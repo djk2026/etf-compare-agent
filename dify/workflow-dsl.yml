@@ -1,0 +1,617 @@
+app:
+  description: 对比最多 5 只 ETF 的基本面、实时行情与历史业绩
+  icon: 🤖
+  icon_background: '#FFEAD5'
+  icon_type: emoji
+  mode: workflow
+  name: ETF分析对比助手
+  use_icon_as_answer_icon: false
+dependencies:
+- current_identifier: null
+  type: marketplace
+  value:
+    marketplace_plugin_unique_identifier: langgenius/deepseek:0.0.19@1aa3c64e2f50179afe8410ad79412dab92bf5919a27da8e2b13071b5e5f8ce81
+    version: null
+kind: app
+version: 0.7.0
+workflow:
+  conversation_variables: []
+  environment_variables: []
+  features:
+    file_upload:
+      allowed_file_extensions:
+      - .JPG
+      - .JPEG
+      - .PNG
+      - .GIF
+      - .WEBP
+      - .SVG
+      allowed_file_types:
+      - image
+      allowed_file_upload_methods:
+      - local_file
+      - remote_url
+      enabled: false
+      fileUploadConfig:
+        attachment_image_file_size_limit: 2
+        audio_file_size_limit: 50
+        batch_count_limit: 5
+        file_size_limit: 15
+        file_upload_limit: 50
+        image_file_batch_limit: 10
+        image_file_size_limit: 10
+        single_chunk_attachment_limit: 10
+        video_file_size_limit: 100
+        workflow_file_upload_limit: 10
+      image:
+        enabled: false
+        number_limits: 3
+        transfer_methods:
+        - local_file
+        - remote_url
+      number_limits: 3
+    opening_statement: ''
+    retriever_resource:
+      enabled: true
+    sensitive_word_avoidance:
+      enabled: false
+    speech_to_text:
+      enabled: false
+    suggested_questions: []
+    suggested_questions_after_answer:
+      enabled: false
+    text_to_speech:
+      enabled: false
+      language: ''
+      voice: ''
+  graph:
+    edges:
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: start
+        targetType: code
+      id: 1785915234186-source-1785915484222-target
+      source: '1785915234186'
+      sourceHandle: source
+      target: '1785915484222'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: code
+        targetType: http-request
+      id: 1785915484222-source-1785915737749-target
+      source: '1785915484222'
+      sourceHandle: source
+      target: '1785915737749'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: code
+        targetType: http-request
+      id: 1785915484222-source-1785916082215-target
+      source: '1785915484222'
+      sourceHandle: source
+      target: '1785916082215'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: code
+        targetType: http-request
+      id: 1785915484222-source-1785916163317-target
+      source: '1785915484222'
+      sourceHandle: source
+      target: '1785916163317'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: http-request
+        targetType: code
+      id: 1785915737749-source-1785916505938-target
+      source: '1785915737749'
+      sourceHandle: source
+      target: '1785916505938'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: http-request
+        targetType: code
+      id: 1785916082215-source-1785916505938-target
+      source: '1785916082215'
+      sourceHandle: source
+      target: '1785916505938'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: http-request
+        targetType: code
+      id: 1785916163317-source-1785916505938-target
+      source: '1785916163317'
+      sourceHandle: source
+      target: '1785916505938'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: code
+        targetType: llm
+      id: 1785916505938-source-1785916798739-target
+      source: '1785916505938'
+      sourceHandle: source
+      target: '1785916798739'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: llm
+        targetType: end
+      id: 1785916798739-source-1785919479212-target
+      source: '1785916798739'
+      sourceHandle: source
+      target: '1785919479212'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    nodes:
+    - data:
+        selected: false
+        title: 用户输入
+        type: start
+        variables:
+        - default: ''
+          hint: ''
+          label: codes
+          max_length: 256
+          options: []
+          placeholder: ''
+          required: true
+          type: text-input
+          variable: codes
+      height: 109
+      id: '1785915234186'
+      position:
+        x: 80
+        y: 283
+      positionAbsolute:
+        x: 80
+        y: 283
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 242
+      zIndex: 0
+    - data:
+        code: "def main(codes: str) -> dict:\n    \"\"\"\n    清洗用户输入的 ETF 代码\n   \
+          \ 1. 按逗号分割 2. 去空格 3. 去重 4. 校验6位数字 5. 最多5只\n    \"\"\"\n    if not codes\
+          \ or not codes.strip():\n        return {\"cleaned_codes\": [], \"warning\"\
+          : \"未输入ETF代码，请重新输入。例如：510300,159915\"}\n\n    raw = [c.strip() for c in\
+          \ codes.split(\",\") if c.strip()]\n    seen = set()\n    valid = []\n\n\
+          \    for c in raw:\n        if c in seen:\n            continue\n      \
+          \  if len(c) == 6 and c.isdigit():\n            seen.add(c)\n          \
+          \  valid.append(c)\n\n    warning_parts = []\n    invalid_count = len(raw)\
+          \ - len(valid)\n    if invalid_count > 0:\n        warning_parts.append(f\"\
+          {invalid_count}个代码无效，已过滤\")\n\n    if len(valid) > 5:\n        valid = valid[:5]\n\
+          \        warning_parts.append(f\"代码超过5只，已截取前5只\")\n\n    warning = \"；\"\
+          .join(warning_parts) if warning_parts else None\n\n    return {\"cleaned_codes\"\
+          : valid, \"warning\": warning}"
+        code_language: python3
+        outputs:
+          cleaned_codes:
+            children: null
+            type: array[string]
+          warning:
+            children: null
+            type: string
+        selected: false
+        title: 代码执行
+        type: code
+        variables:
+        - value_selector:
+          - '1785915234186'
+          - codes
+          value_type: string
+          variable: codes
+      height: 52
+      id: '1785915484222'
+      position:
+        x: 382.53817037159
+        y: 304
+      positionAbsolute:
+        x: 382.53817037159
+        y: 304
+      selected: true
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 242
+      zIndex: 0
+    - data:
+        authorization:
+          config: null
+          type: no-auth
+        body:
+          data:
+          - id: key-value-78
+            key: ''
+            type: text
+            value: '{"codes": {{#1785915484222.cleaned_codes#}}}'
+          type: json
+        headers: Content-Type:application/json
+        method: post
+        params: ''
+        retry_config:
+          max_retries: 3
+          retry_enabled: true
+          retry_interval: 100
+        selected: false
+        ssl_verify: true
+        timeout:
+          max_connect_timeout: 0
+          max_read_timeout: 0
+          max_write_timeout: 0
+        title: ETF基本信息
+        type: http-request
+        url: https://etf-compare-agent-jba2.vercel.app/api/etf/basic
+        variables: []
+      height: 137
+      id: '1785915737749'
+      position:
+        x: 685
+        y: 71
+      positionAbsolute:
+        x: 685
+        y: 71
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 242
+      zIndex: 0
+    - data:
+        authorization:
+          config: null
+          type: no-auth
+        body:
+          data:
+          - id: key-value-176
+            key: ''
+            type: text
+            value: '{"codes": {{#1785915484222.cleaned_codes#}}}'
+          type: json
+        headers: Content-Type:application/json
+        method: post
+        params: ''
+        retry_config:
+          max_retries: 3
+          retry_enabled: true
+          retry_interval: 100
+        selected: false
+        ssl_verify: true
+        timeout:
+          max_connect_timeout: 0
+          max_read_timeout: 0
+          max_write_timeout: 0
+        title: ETF实时行情
+        type: http-request
+        url: https://etf-compare-agent-jba2.vercel.app/api/etf/snapshot
+        variables: []
+      height: 137
+      id: '1785916082215'
+      position:
+        x: 685
+        y: 255
+      positionAbsolute:
+        x: 685
+        y: 255
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 242
+      zIndex: 0
+    - data:
+        authorization:
+          config: null
+          type: no-auth
+        body:
+          data:
+          - id: key-value-260
+            key: ''
+            type: text
+            value: '{"codes": {{#1785915484222.cleaned_codes#}}}'
+          type: json
+        headers: Content-Type:application/json
+        method: post
+        params: ''
+        retry_config:
+          max_retries: 3
+          retry_enabled: true
+          retry_interval: 100
+        selected: false
+        ssl_verify: true
+        timeout:
+          max_connect_timeout: 0
+          max_read_timeout: 0
+          max_write_timeout: 0
+        title: ETF历史业绩
+        type: http-request
+        url: https://etf-compare-agent-jba2.vercel.app/api/etf/performance
+        variables: []
+      height: 153
+      id: '1785916163317'
+      position:
+        x: 685
+        y: 422
+      positionAbsolute:
+        x: 685
+        y: 422
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 242
+      zIndex: 0
+    - data:
+        code: "import json\n\n\ndef main(basic_body: str, snapshot_body: str, performance_body:\
+          \ str,\n         cleaned_codes: list, warning: str) -> dict:\n    \"\"\"\
+          \n    聚合 3 个 HTTP 节点的返回结果，构建结构化对比矩阵给 LLM\n    \"\"\"\n    # 1. 安全解析 JSON\n\
+          \    def safe_parse(raw):\n        if not raw:\n            return {}\n\
+          \        try:\n            return json.loads(raw) if isinstance(raw, str)\
+          \ else raw\n        except (json.JSONDecodeError, TypeError):\n        \
+          \    return {}\n\n    basic = safe_parse(basic_body)\n    snapshot = safe_parse(snapshot_body)\n\
+          \    performance = safe_parse(performance_body)\n\n    # 2. 统计各维度成功率\n \
+          \   basic_ok = sum(1 for c in cleaned_codes if basic.get(c) and not basic[c].get(\"\
+          error\"))\n    snapshot_ok = sum(1 for c in cleaned_codes if snapshot.get(c)\
+          \ and not snapshot[c].get(\"error\"))\n    perf_ok = sum(1 for c in cleaned_codes\
+          \ if performance.get(c) and not performance[c].get(\"error\"))\n\n    total\
+          \ = len(cleaned_codes)\n    basic_rate = basic_ok / total if total > 0 else\
+          \ 0\n    snap_rate = snapshot_ok / total if total > 0 else 0\n    perf_rate\
+          \ = perf_ok / total if total > 0 else 0\n\n    # 3. 全部失败 → 兜底\n    if basic_rate\
+          \ == perf_rate == snap_rate == 0:\n        return {\n            \"comparison_data\"\
+          : \"\",\n            \"has_data\": \"false\",\n            \"error_message\"\
+          : \"当前数据服务暂不可用，请稍后重试。\"\n        }\n\n    # 4. 逐只聚合\n    etfs = []\n   \
+          \ for code in cleaned_codes:\n        b = basic.get(code, {}) or {}\n  \
+          \      s = snapshot.get(code, {}) or {}\n        p = performance.get(code,\
+          \ {}) or {}\n\n        etf = {\n            \"代码\": code,\n            \"\
+          名称\": b.get(\"name\"),\n            \"基金公司\": b.get(\"management_company\"\
+          ),\n            \"跟踪指数\": b.get(\"tracking_index\"),\n            \"行业分类\"\
+          : b.get(\"industry\"),\n            \"基金规模\": b.get(\"fund_size\"),\n  \
+          \          \"管理费率\": b.get(\"management_fee\"),\n            \"成立日期\": b.get(\"\
+          established_date\"),\n            \"最新价\": s.get(\"price\"),\n         \
+          \   \"今日涨跌幅\": s.get(\"change_percent\"),\n            \"今日成交额\": s.get(\"\
+          volume\"),\n            \"折溢价率\": s.get(\"discount_premium\"),\n       \
+          \     \"近1周收益\": p.get(\"returns\", {}).get(\"week1\") if p else None,\n\
+          \            \"近1月收益\": p.get(\"returns\", {}).get(\"month1\") if p else\
+          \ None,\n            \"近3月收益\": p.get(\"returns\", {}).get(\"month3\") if\
+          \ p else None,\n            \"近6月收益\": p.get(\"returns\", {}).get(\"month6\"\
+          ) if p else None,\n            \"近1年收益\": p.get(\"returns\", {}).get(\"\
+          year1\") if p else None,\n        }\n        etfs.append(etf)\n\n    # 5.\
+          \ 构建简洁的结构化矩阵\n    lines = []\n    lines.append(\"## ETF 对比数据矩阵\\n\")\n \
+          \   for etf in etfs:\n        name = etf.get(\"名称\")\n        lines.append(f\"\
+          ### {name}({etf['代码']})\")\n        for key in [\"跟踪指数\", \"行业分类\", \"基金公司\"\
+          , \"基金规模\", \"管理费率\", \"成立日期\",\n                     \"最新价\", \"今日涨跌幅\"\
+          , \"今日成交额\", \"折溢价率\",\n                     \"近1周收益\", \"近1月收益\", \"近3月收益\"\
+          , \"近6月收益\", \"近1年收益\"]:\n            val = etf.get(key)\n            if\
+          \ val is not None:\n                if isinstance(val, float):\n       \
+          \             val = f\"{val:+.4f}\"\n                lines.append(f\"- {key}:\
+          \ {val}\")\n            else:\n                lines.append(f\"- {key}:\
+          \ 暂无数据\")\n        lines.append(\"\")\n\n    # 6. 附加错误信息\n    error_parts\
+          \ = []\n    if basic_rate < 0.5:\n        error_parts.append(\"基本信息\")\n\
+          \    if snap_rate < 0.5:\n        error_parts.append(\"实时行情\")\n    if perf_rate\
+          \ < 0.5:\n        error_parts.append(\"历史业绩\")\n\n    if error_parts:\n\
+          \        lines.append(f\"---\\n> ⚠️ 以下维度数据暂不可用：{'、'.join(error_parts)}\"\
+          )\n\n    return {\n        \"comparison_data\": \"\\n\".join(lines),\n \
+          \       \"has_data\": \"true\",\n        \"error_message\": None\n    }"
+        code_language: python3
+        outputs:
+          comparison_data:
+            children: null
+            type: string
+          error_message:
+            children: null
+            type: string
+          has_data:
+            children: null
+            type: string
+        selected: false
+        title: 数据聚合
+        type: code
+        variables:
+        - value_selector:
+          - '1785915737749'
+          - body
+          value_type: string
+          variable: basic_body
+        - value_selector:
+          - '1785916082215'
+          - body
+          value_type: string
+          variable: snapshot_body
+        - value_selector:
+          - '1785916163317'
+          - body
+          value_type: string
+          variable: performance_body
+        - value_selector:
+          - '1785915484222'
+          - cleaned_codes
+          value_type: array[string]
+          variable: cleaned_codes
+        - value_selector:
+          - '1785915484222'
+          - warning
+          value_type: string
+          variable: warning
+      height: 52
+      id: '1785916505938'
+      position:
+        x: 1054
+        y: 316
+      positionAbsolute:
+        x: 1054
+        y: 316
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 242
+      zIndex: 0
+    - data:
+        context:
+          enabled: false
+          variable_selector: []
+        model:
+          completion_params:
+            temperature: 0.3
+          mode: chat
+          name: deepseek-v4-flash
+          provider: langgenius/deepseek/deepseek
+        prompt_template:
+        - id: ea0f6d62-5145-4b08-b7fa-1d49e4d85f52
+          role: system
+          text: '你是一个专业的 ETF 对比分析助手。你的任务是基于真实数据，帮用户对比多只 ETF 的核心维度差异。
+
+
+            ## 行为准则
+
+
+            1. 禁止提供投资建议。不说"建议买入"、"推荐持有"、"这只更好"等结论性判断
+
+            2. 禁止编造数据。只基于提供的真实数据，缺失数据标注"暂无数据"
+
+            3. 必须用白话解释专业术语。如出现"跟踪误差"、"折溢价"等，要加简短解释
+
+            4. 底部必须标注："数据来源：新浪财经 / 东方财富公开数据，延迟约 15-30 分钟，仅供参考"
+
+            5. 结构化输出，格式见下方
+
+            6. 最多对比 5 只 ETF
+
+
+            ## 输出格式
+
+
+            ### 对比总览
+
+
+            用 Markdown 表格列出对比维度
+
+
+            ### 逐只解读
+
+
+            每只 ETF 一段话（不超过 5 行）
+
+
+            ### 维度对比总结
+
+
+            选择差异最大的 2-3 个维度深入对比
+
+
+            ### 注意事项
+
+
+            - 历史业绩不代表未来表现
+
+            - 费率、规模、跟踪误差是选 ETF 的核心维度
+
+
+            ---
+
+            数据来源：新浪财经 / 东方财富公开数据，延迟约 15-30 分钟，仅供参考。不构成投资建议。'
+        - id: 2883889a-9c47-4b3c-ba62-5e4e11a0472b
+          role: user
+          text: '{% if has_data == "false" %}
+
+            当前数据服务不可用，错误信息：{{#1785916505938.error_message#}}
+
+            {% else %}
+
+            {% if warning %}
+
+            > ⚠️ 输入提示：{{#1785915484222.warning#}}
+
+            {% endif %}
+
+
+            请基于以下数据生成 ETF 对比分析报告，严格遵循 SYSTEM 中的行为准则和输出格式要求。
+
+
+            {{#1785916505938.comparison_data#}}
+
+            {% endif %}'
+        - id: 94315183-98a5-4e3d-96b9-b72d6acf36dd
+          role: assistant
+          text: ''
+        selected: false
+        title: 生成对比报告
+        type: llm
+        vision:
+          enabled: false
+      height: 88
+      id: '1785916798739'
+      position:
+        x: 1356
+        y: 316
+      positionAbsolute:
+        x: 1356
+        y: 316
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 242
+      zIndex: 0
+    - data:
+        outputs:
+        - value_selector:
+          - '1785916798739'
+          - text
+          value_type: string
+          variable: report
+        selected: false
+        title: 输出
+        type: end
+      height: 89
+      id: '1785919479212'
+      position:
+        x: 1658
+        y: 316
+      positionAbsolute:
+        x: 1658
+        y: 316
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 242
+      zIndex: 0
+    viewport:
+      x: 72.86374783537372
+      y: 179.7356759657356
+      zoom: 0.7095464215334267
+  rag_pipeline_variables: []
