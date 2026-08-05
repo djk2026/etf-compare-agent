@@ -1,0 +1,464 @@
+"""
+ETF 对比分析 Agent — 共享数据抓取逻辑
+供 Vercel Serverless Functions 导入使用
+数据源：东方财富 + 新浪财经公开接口
+"""
+
+import urllib.request
+import json
+import re
+import time
+import logging
+from typing import Optional
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# ── HTTP Headers ─────────────────────────────────────────────
+
+HEADERS_EASTMONEY = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+    "Referer": "http://fund.eastmoney.com/",
+    "Accept": "*/*",
+}
+
+HEADERS_SINA = {
+    "Referer": "https://finance.sina.com.cn",
+    "User-Agent": "Mozilla/5.0",
+}
+
+# ── 工具函数 ──────────────────────────────────────────────────
+
+def infer_exchange(code: str) -> str:
+    if code.startswith(("51", "56", "58")):
+        return "sh"
+    if code.startswith(("15", "16")):
+        return "sz"
+    return "sh"
+
+
+def to_sina_symbol(code: str) -> Optional[str]:
+    if code.startswith(("51", "56", "58")):
+        return f"sh{code}"
+    if code.startswith(("15", "16")):
+        return f"sz{code}"
+    return None
+
+
+# ── 东方财富基金列表过滤常量 ────────────────────────────────
+
+NON_A_KEYWORDS = [
+    "恒生", "港股", "纳斯达克", "标普", "日经", "德国", "法国", "韩国",
+    "印度", "越南", "MSCI", "中概互联", "H股", "国企指数", "美股", "海外",
+    "全球", "亚太", "新兴市场", "欧洲", "美国",
+]
+
+NON_EQUITY_NAME = [
+    "货币", "保证金", "短融", "债", "转债", "固收", "添益", "日利", "理财", "现金",
+]
+
+NON_EQUITY_TYPE = ["货币型", "债券型"]
+
+SH_ETF_PREFIXES = ("51", "56", "58")
+SZ_ETF_PREFIXES = ("159", "16")
+
+
+def is_a_share(name: str) -> bool:
+    for kw in NON_A_KEYWORDS:
+        if kw in name:
+            return False
+    return True
+
+
+def is_equity(name: str, fund_type: str) -> bool:
+    for kw in NON_EQUITY_TYPE:
+        if kw in fund_type:
+            return False
+    for kw in NON_EQUITY_NAME:
+        if kw in name:
+            return False
+    return True
+
+
+def is_etf_like(code: str) -> bool:
+    if code.startswith(SH_ETF_PREFIXES):
+        if len(code) >= 3 and code[2] == "9":
+            return False
+        return True
+    if code.startswith(SZ_ETF_PREFIXES):
+        return True
+    return False
+
+
+# ── 名称解析 ──────────────────────────────────────────────────
+
+COMPANY_KEYWORDS = [
+    ("华泰柏瑞", "华泰柏瑞基金管理有限公司"),
+    ("易方达", "易方达基金管理有限公司"),
+    ("华夏", "华夏基金管理有限公司"),
+    ("南方", "南方基金管理股份有限公司"),
+    ("广发", "广发基金管理有限公司"),
+    ("富国", "富国基金管理有限公司"),
+    ("博时", "博时基金管理有限公司"),
+    ("嘉实", "嘉实基金管理有限公司"),
+    ("招商", "招商基金管理有限公司"),
+    ("天弘", "天弘基金管理有限公司"),
+    ("国泰", "国泰基金管理有限公司"),
+    ("鹏华", "鹏华基金管理有限公司"),
+    ("银华", "银华基金管理有限公司"),
+    ("华安", "华安基金管理有限公司"),
+    ("工银瑞信", "工银瑞信基金管理有限公司"),
+    ("汇添富", "汇添富基金管理股份有限公司"),
+    ("景顺长城", "景顺长城基金管理有限公司"),
+    ("万家", "万家基金管理有限公司"),
+    ("中欧", "中欧基金管理有限公司"),
+    ("交银施罗德", "交银施罗德基金管理有限公司"),
+    ("兴证全球", "兴证全球基金管理有限公司"),
+    ("建信", "建信基金管理有限责任公司"),
+    ("平安", "平安基金管理有限公司"),
+    ("国联安", "国联安基金管理有限公司"),
+    ("海富通", "海富通基金管理有限公司"),
+]
+
+INDEX_KEYWORDS = [
+    ("沪深300", "沪深300指数"), ("中证500", "中证500指数"),
+    ("中证1000", "中证1000指数"), ("中证2000", "中证2000指数"),
+    ("上证50", "上证50指数"), ("上证180", "上证180指数"),
+    ("上证指数", "上证综合指数"), ("科创50", "科创50指数"),
+    ("科创100", "科创100指数"), ("科创创业50", "科创创业50指数"),
+    ("创业板", "创业板指数"), ("创业板50", "创业板50指数"),
+    ("深证100", "深证100指数"), ("深证成指", "深证成份指数"),
+    ("中证红利", "中证红利指数"), ("中证银行", "中证银行指数"),
+    ("证券公司", "证券公司指数"), ("中证军工", "中证军工指数"),
+    ("中证医疗", "中证医疗指数"), ("中证消费", "中证消费指数"),
+    ("中证白酒", "中证白酒指数"), ("中证畜牧", "中证畜牧养殖指数"),
+    ("半导体", "半导体指数"), ("芯片", "芯片指数"),
+    ("新能源", "新能源指数"), ("光伏", "光伏产业指数"),
+    ("新能源汽车", "新能源汽车指数"), ("电池", "电池指数"),
+    ("碳中和", "碳中和指数"), ("人工智能", "人工智能指数"),
+    ("计算机", "计算机指数"), ("通信", "通信指数"),
+    ("5G", "5G通信指数"), ("大数据", "大数据指数"),
+    ("云计算", "云计算指数"), ("传媒", "传媒指数"),
+    ("游戏", "游戏指数"), ("食品饮料", "食品饮料指数"),
+    ("医药", "医药指数"), ("创新药", "创新药指数"),
+    ("中药", "中药指数"), ("房地产", "房地产指数"),
+    ("基建", "基建工程指数"), ("电力", "电力指数"),
+    ("煤炭", "煤炭指数"), ("钢铁", "钢铁指数"),
+    ("有色金属", "有色金属指数"), ("化工", "化工指数"),
+    ("农业", "农业指数"), ("汽车", "汽车指数"),
+    ("稀土", "稀土指数"), ("黄金", "黄金指数"),
+    ("国防", "国防指数"),
+]
+
+
+def extract_management_company(name: str) -> Optional[str]:
+    for kw, full_name in COMPANY_KEYWORDS:
+        if kw in name:
+            return full_name
+    return None
+
+
+def infer_tracking_index(name: str) -> Optional[str]:
+    for kw, index_name in INDEX_KEYWORDS:
+        if kw in name:
+            return index_name
+    return None
+
+
+def infer_industry(name: str, fund_type: str) -> Optional[str]:
+    industry_map = [
+        (["沪深300", "上证50", "上证180", "深证100", "中证100"], "大盘蓝筹"),
+        (["中证500", "中证800"], "中盘成长"),
+        (["中证1000", "中证2000", "国证2000"], "小盘成长"),
+        (["科创50", "科创100", "科创创业50", "创业板"], "科技创新"),
+        (["半导体", "芯片", "5G", "人工智能", "计算机", "通信", "大数据", "云计算", "电子"], "科技/TMT"),
+        (["新能源", "光伏", "新能源汽车", "电池", "碳中和", "电力"], "新能源"),
+        (["医药", "创新药", "中药", "医疗", "生物医药"], "医药健康"),
+        (["银行", "证券", "金融", "保险"], "金融"),
+        (["消费", "食品饮料", "白酒", "家电"], "消费"),
+        (["军工", "国防", "航"], "国防军工"),
+        (["房地产", "基建"], "地产基建"),
+        (["煤炭", "钢铁", "有色金属", "化工", "稀土", "黄金"], "资源周期"),
+        (["传媒", "游戏"], "传媒娱乐"),
+        (["红利"], "红利策略"),
+    ]
+    for keywords, industry in industry_map:
+        for kw in keywords:
+            if kw in name:
+                return industry
+    return "综合/其他"
+
+
+# ── 基金列表（缓存 10 分钟）──────────────────────────────────
+
+_fund_list_cache: Optional[dict] = None
+_fund_list_cache_time: float = 0
+CACHE_TTL = 600
+
+
+def fetch_fund_list() -> dict[str, dict]:
+    global _fund_list_cache, _fund_list_cache_time
+
+    if _fund_list_cache and (time.time() - _fund_list_cache_time) < CACHE_TTL:
+        return _fund_list_cache
+
+    logger.info("正在从东方财富下载全量基金列表...")
+    url = "http://fund.eastmoney.com/js/fundcode_search.js"
+    req = urllib.request.Request(url, headers=HEADERS_EASTMONEY)
+
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            raw = resp.read().decode("utf-8", errors="replace")
+    except Exception as e:
+        logger.error(f"下载基金列表失败: {e}")
+        if _fund_list_cache:
+            return _fund_list_cache  # fallback to stale cache
+        raise RuntimeError("东方财富数据接口不可用")
+
+    try:
+        idx = raw.index("var r = [") + len("var r = [")
+        content = raw[idx:-2]
+    except ValueError:
+        logger.error("基金列表格式解析失败")
+        if _fund_list_cache:
+            return _fund_list_cache
+        raise RuntimeError("东方财富数据格式异常")
+
+    entries = content.split("],[")
+    result = {}
+    seen = set()
+
+    for i, entry in enumerate(entries):
+        if i == 0:
+            entry = entry[1:]
+        if i == len(entries) - 1:
+            entry = entry[:-1]
+        parts = entry.split('","')
+        if len(parts) < 4:
+            continue
+        code = parts[0].strip('"')
+        name = parts[2].strip('"') if len(parts) > 2 else ""
+        fund_type = parts[3].strip('"') if len(parts) > 3 else ""
+        if not code or not name:
+            continue
+        if not is_etf_like(code):
+            continue
+        if code in seen:
+            continue
+        if not is_equity(name, fund_type):
+            continue
+        seen.add(code)
+        result[code] = {
+            "name": name,
+            "exchange": infer_exchange(code),
+            "fund_type_raw": fund_type,
+            "is_a_share": is_a_share(name),
+            "management_company": extract_management_company(name),
+            "tracking_index": infer_tracking_index(name),
+            "industry": infer_industry(name, fund_type),
+        }
+
+    _fund_list_cache = result
+    _fund_list_cache_time = time.time()
+    logger.info(f"基金列表已缓存，共 {len(result)} 只 A 股 ETF")
+    return result
+
+
+# ── 基金详情（规模、成立日期）──────────────────────────────
+
+def fetch_fund_detail(code: str) -> dict:
+    url = f"http://fund.eastmoney.com/pingzhongdata/{code}.js"
+    result = {}
+
+    try:
+        req = urllib.request.Request(url, headers=HEADERS_EASTMONEY)
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            raw = resp.read().decode("utf-8", errors="replace")
+    except Exception as e:
+        logger.warning(f"获取 {code} pingzhongdata 失败: {e}")
+        raw = ""
+
+    if raw:
+        m_alloc = re.search(r"Data_assetAllocation\s*=\s*(\{[\s\S]*?\});", raw)
+        if m_alloc:
+            try:
+                alloc = json.loads(m_alloc.group(1))
+                for s in alloc.get("series", []):
+                    if "净资产" in s.get("name", ""):
+                        data = s.get("data", [])
+                        if data:
+                            result["fund_size"] = round(float(data[-1]), 2)
+                        break
+            except (json.JSONDecodeError, ValueError, IndexError):
+                pass
+
+    try:
+        html_url = f"http://fund.eastmoney.com/{code}.html"
+        req = urllib.request.Request(html_url, headers=HEADERS_EASTMONEY)
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            html = resp.read().decode("utf-8", errors="replace")
+        for keyword in ["成立日期", "成立时间"]:
+            idx = html.find(keyword)
+            if idx > 0:
+                snippet = html[idx:idx + 200]
+                m_date = re.search(r"(\d{4}[年\-/]\d{1,2}[月\-/]\d{1,2}[日]?)", snippet)
+                if m_date:
+                    date_str = m_date.group(1)
+                    date_str = date_str.replace("年", "-").replace("月", "-").replace("日", "")
+                    result["establishment_date"] = date_str
+                    break
+    except Exception as e:
+        logger.warning(f"获取 {code} HTML 页面失败: {e}")
+
+    return result
+
+
+# ── 新浪财经实时快照 ────────────────────────────────────────
+
+def fetch_snapshots(codes: list[str]) -> dict[str, Optional[dict]]:
+    sina_symbols = []
+    sym_to_code = {}
+    for code in codes:
+        sym = to_sina_symbol(code)
+        if sym:
+            sina_symbols.append(sym)
+            sym_to_code[sym] = code
+
+    if not sina_symbols:
+        return {code: None for code in codes}
+
+    url = "https://hq.sinajs.cn/list=" + ",".join(sina_symbols)
+    req = urllib.request.Request(url, headers=HEADERS_SINA)
+
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            raw = resp.read().decode("gbk")
+    except Exception as e:
+        logger.error(f"新浪快照请求失败: {e}")
+        return {code: None for code in codes}
+
+    results = {}
+    for line in raw.strip().split("\n"):
+        for sina_sym, code in sym_to_code.items():
+            if sina_sym not in line:
+                continue
+            try:
+                start = line.index('"') + 1
+                end = line.rindex('"')
+                parts = line[start:end].split(",")
+                if len(parts) < 10:
+                    results[code] = None
+                    continue
+                name = parts[0]
+                open_price = float(parts[1]) if parts[1] else None
+                prev_close = float(parts[2]) if parts[2] else None
+                price = float(parts[3]) if parts[3] else None
+                high = float(parts[4]) if parts[4] else None
+                low = float(parts[5]) if parts[5] else None
+                volume = float(parts[8]) if len(parts) > 8 and parts[8] else None
+                amount = float(parts[9]) if len(parts) > 9 and parts[9] else None
+
+                if price is None or prev_close is None or prev_close == 0:
+                    results[code] = None
+                    continue
+                if price <= 0.01:
+                    results[code] = None
+                    continue
+                change_pct = (price - prev_close) / prev_close
+                if abs(change_pct) >= 0.30:
+                    results[code] = None
+                    continue
+
+                results[code] = {
+                    "name": name, "price": round(price, 4),
+                    "prev_close": round(prev_close, 4),
+                    "change_percent": round(change_pct, 6),
+                    "open_price": round(open_price, 4) if open_price else None,
+                    "high": round(high, 4) if high else None,
+                    "low": round(low, 4) if low else None,
+                    "volume": volume, "amount": amount,
+                }
+            except (ValueError, IndexError):
+                results[code] = None
+
+    for code in codes:
+        if code not in results:
+            results[code] = None
+    return results
+
+
+# ── 新浪 K 线历史数据（performance） ─────────────────────────
+
+def resolve_kline_symbol(code: str) -> str:
+    if code.startswith(("51", "56", "58")):
+        return f"sh{code}"
+    if code.startswith(("15", "16")):
+        return f"sz{code}"
+    return f"sh{code}"
+
+
+def calculate_returns(kline_data: list[dict]) -> dict[str, Optional[float]]:
+    if not kline_data or len(kline_data) < 2:
+        return {}
+    try:
+        latest_close = float(kline_data[-1]["close"])
+    except (KeyError, ValueError, IndexError):
+        return {}
+    if latest_close == 0:
+        return {}
+
+    def get_return(days_back: int) -> Optional[float]:
+        if days_back >= len(kline_data):
+            return None
+        try:
+            past_close = float(kline_data[-1 - days_back]["close"])
+        except (KeyError, ValueError):
+            return None
+        if past_close == 0:
+            return None
+        return round((latest_close - past_close) / past_close, 6)
+
+    return {
+        "week1": get_return(5),
+        "month1": get_return(21),
+        "month3": get_return(63),
+        "month6": get_return(126) if len(kline_data) > 126 else None,
+        "year1": get_return(250) if len(kline_data) > 250 else None,
+    }
+
+
+def _fetch_single_performance(code: str, days: int = 250) -> Optional[dict]:
+    kline_symbol = resolve_kline_symbol(code)
+    url = (
+        "http://money.finance.sina.com.cn/quotes_service/api/json_v2.php/"
+        f"CN_MarketData.getKLineData?symbol={kline_symbol}&scale=240&datalen={days}"
+    )
+    try:
+        req = urllib.request.Request(url, headers=HEADERS_SINA)
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            raw = resp.read().decode("gbk")
+        data = json.loads(raw)
+        if not isinstance(data, list) or len(data) == 0:
+            return None
+        returns = calculate_returns(data)
+        if not returns:
+            return None
+        return {"name": "", "returns": returns}
+    except Exception as e:
+        logger.warning(f"获取 {code} K 线数据失败: {e}")
+        return None
+
+
+def fetch_performances(codes: list[str]) -> dict[str, Optional[dict]]:
+    """并发获取多只 ETF 历史表现（适应 Vercel 10s 超时限制）"""
+    results = {}
+    with ThreadPoolExecutor(max_workers=min(len(codes), 5)) as executor:
+        futures = {executor.submit(_fetch_single_performance, code): code for code in codes}
+        for future in as_completed(futures, timeout=12):
+            code = futures[future]
+            try:
+                results[code] = future.result()
+            except Exception:
+                results[code] = None
+    return results
