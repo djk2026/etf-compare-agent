@@ -5,16 +5,19 @@
 ## 总览：5 阶段 / 20 步骤
 
 ```
-Stage 1 (数据服务)  ████████████░░░░░░░░  5 步
-Stage 2 (Dify)      ░░░░░░░░░░░░████████  4 步
-Stage 3 (前端)      ░░░░░░░░░░░░░░░░████  4 步
-Stage 4 (安全)      ░░░░░░░░░░░░░░░░░░██  融合在 Stage 3
-Stage 5 (文档)      ░░░░░░░░░░░░░░░░░░░█  3 步
+Stage 1 (数据服务)  ████████████████████  5 步 ✅ 已完成
+Stage 2 (Dify)      ░░░░░░░░░░░░░░░░░░░░  4 步 ← 当前
+Stage 3 (前端)      ░░░░░░░░░░░░░░░░░░░░  4 步
+Stage 4 (安全)      ░░░░░░░░░░░░░░░░░░░░  融合在 Stage 3
+Stage 5 (文档)      ░░░░░░░░░░░░░░░░░░░░  3 步
 ```
+
+**实际部署域名**: `https://etf-compare-agent-jba2.vercel.app`  
+**部署平台**: Vercel（Serverless Functions），Render 因需要境外信用卡被否决
 
 ---
 
-# Stage 1：Python 数据服务 + Render 部署
+# Stage 1：Python 数据服务 + Vercel 部署 ✅ 已完成
 
 ## 1.1 创建项目骨架
 
@@ -100,26 +103,43 @@ httpx==0.27.0
 
 ---
 
-## 1.5 Render 部署
+## 1.5 Vercel 部署
 
 | 项目 | 内容 |
 |------|------|
 | **目的** | 把数据服务部署到公网，让 Dify 能通过 HTTPS 调用 |
-| **操作** | 注册 Render → New Web Service → 关联 GitHub 仓库 → 配 Build/Start 命令 |
-| **效果** | 获得 `https://etf-compare.onrender.com` 域名，3 个端点公网可访问 |
-| **验收** | Postman 调 `https://xxx.onrender.com/api/etf/basic`，返回正确数据；冷启动后首次请求 <45 秒，后续 <3 秒 |
-| **耗时** | 1 小时 |
+| **操作** | GitHub 推送代码 → Vercel import 仓库 → 自动部署（零配置） |
+| **效果** | 获得 `https://etf-compare-agent-jba2.vercel.app` 域名，3 个端点公网可访问 |
+| **注意** | Render 因需要境外信用卡被否决，改用 Vercel Serverless Functions（Python） |
 
-### Render 配置
+### 架构调整
+
 ```
-Build Command: pip install -r requirements.txt
-Start Command: uvicorn main:app --host 0.0.0.0 --port $PORT
+原计划: FastAPI → Render Web Service
+实际部署: Python Serverless Functions → Vercel
+
+api/etf/_shared.py        # 共享数据抓取逻辑
+api/etf/basic.py          # → /api/etf/basic
+api/etf/snapshot.py       # → /api/etf/snapshot
+api/etf/performance.py    # → /api/etf/performance（并发请求，适配 10s 超时）
 ```
 
-### 注意事项
-- 免费版 15 分钟无请求会休眠，首次唤醒冷启动约 30 秒
-- 因此在 Dify Workflow 中 Tool 超时时间设 **45 秒**以上
-- 拿到域名后**立刻记下来**，Stage 2 配 Dify Tool 要用
+### 部署验证结果（2026-08-05）
+
+| 端点 | 状态 | 响应时间 | 验证数据 |
+|------|------|---------|---------|
+| basic | 200 | 5.7s（含冷启动） | 510300→沪深300ETF华泰柏瑞, 948.72亿, 大盘蓝筹 |
+| snapshot | 200 | 3.4s | 510300→¥4.726, +1.61% |
+| performance | 200 | 3.7s | 510300→1周+0.52%, 1月-4.63%, 3月-4.85% |
+
+**Dify Tool URL 配置（Stage 2 使用）**：
+- basic: `POST https://etf-compare-agent-jba2.vercel.app/api/etf/basic`
+- snapshot: `POST https://etf-compare-agent-jba2.vercel.app/api/etf/snapshot`
+- performance: `POST https://etf-compare-agent-jba2.vercel.app/api/etf/performance`
+
+所有端点 Body: `{"codes": ["510300", "159915"]}`
+
+
 
 ---
 
