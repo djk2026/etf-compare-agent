@@ -1,6 +1,6 @@
 # ETF 对比分析助手
 
-> 输入 2-5 只 ETF 代码，并行查询基本面、实时行情、历史业绩，生成结构化对比报告。
+> 搜索 ETF 名称或代码，一键添加对比标的。Agent 并行查询基本面、实时行情、历史业绩，生成结构化对比报告。
 >
 > 与 [ETF 持仓解释工具](https://github.com/djk2026/etf-holdings) 互补——前者"看懂持仓"，本项目"对比选哪只"。
 
@@ -13,6 +13,14 @@
 - **3 个 Tool 并行调用**：基本信息 / 实时行情 / 历史业绩同时获取，不串行等待
 - **LLM 只负责推理**：数据聚合清洗由 Code 节点完成，LLM 专注生成对比报告
 - **结构化约束**：System Prompt 强制表格 + 逐只解读 + 维度总结格式
+
+## 功能特性
+
+- **模糊搜索 + 标签选择**：输入"沪深300"即可搜出所有跟踪沪深 300 指数的 ETF，点击标签添加对比，无需记忆代码
+- **键盘导航支持**：↑↓ 选择、Enter 确认、Esc 关闭、Backspace 删除标签
+- **3 维度并行对比**：基本信息（规模/费率/跟踪指数）、实时行情（最新价/涨跌幅/成交额）、历史业绩（1周/1月/3月/6月/1年）
+- **AI 解读报告**：对比总览表格 + 逐只解读 + 维度差异总结 + 白话术语翻译
+- **数据标注**：缺失数据标注"暂无数据"，底部标明数据延迟 15-30 分钟
 
 ---
 
@@ -46,9 +54,11 @@ flowchart LR
 | 方式 | 链接 |
 |------|------|
 | **网页版** | [https://etf-compare-agent-jba2.vercel.app](https://etf-compare-agent-jba2.vercel.app) |
-| **数据服务 API** | `POST https://etf-compare-agent-jba2.vercel.app/api/etf/{basic,snapshot,performance}` |
+| **数据服务 API** | `https://etf-compare-agent-jba2.vercel.app/api/etf/` |
 
-示例输入：`510300,159915,588000`
+**使用方式**：在搜索框输入 ETF 名称（如"沪深300"）或代码（如"510300"），从下拉列表中点击添加，选好 2-5 只后点击"开始对比"，等待约 10-20 秒即可看到完整的 AI 对比报告。
+
+也可直接使用快捷标签：`沪深300 + 创业板` 一键填入两组对比候选。
 
 ---
 
@@ -57,17 +67,23 @@ flowchart LR
 ```
 etf-compare-agent/
 ├── index.html                  # 前端：Vue3 CDN + marked.js 单文件
+│                                #   - 模糊搜索 + 标签选择 + 键盘导航
+│                                #   - 快捷示例标签 + Loading 动画
+│                                #   - Markdown 报告渲染
 ├── api/
 │   ├── compare.js              # Vercel Serverless：Dify API Key 代理
 │   └── etf/
 │       ├── _shared.py          # 共享：东方财富/新浪抓取逻辑
 │       ├── basic.py            # → /api/etf/basic
 │       ├── snapshot.py         # → /api/etf/snapshot
-│       └── performance.py      # → /api/etf/performance（并发K线）
+│       ├── performance.py      # → /api/etf/performance（并发K线）
+│       └── search.py           # → /api/etf/search（模糊搜索）
 ├── data-service/               # 本地开发用 FastAPI（保留）
 │   ├── main.py
 │   ├── shared.py
 │   └── requirements.txt
+├── dify/
+│   └── workflow-dsl.yml        # Dify Workflow 可导入文件
 ├── PROJECT_MANUAL.md           # 完整项目手册（需求/架构/Prompt/踩坑）
 ├── IMPLEMENTATION_PLAN.md      # 实施计划（20 步可验收）
 └── .gitignore
@@ -93,13 +109,12 @@ etf-compare-agent/
 
 ## 数据服务 API
 
-所有端点 POST，Body：`{"codes": ["510300", "159915"]}`
-
-| 端点 | 数据 | 数据源 |
-|------|------|--------|
-| `/api/etf/basic` | 名称、规模、费率、跟踪指数、行业分类 | 东方财富 `fundcode_search.js` |
-| `/api/etf/snapshot` | 最新价、涨跌幅、成交额、折溢价 | 新浪 `hq.sinajs.cn` |
-| `/api/etf/performance` | 1周/1月/3月/6月/1年涨跌幅 | 新浪 K 线接口 |
+| 端点 | 方法 | Body | 数据 | 数据源 |
+|------|------|------|------|--------|
+| `/api/etf/search` | GET | `?keyword=科创` | ETF 搜索建议（代码/名称/公司） | 东方财富 `fundcode_search.js` |
+| `/api/etf/basic` | POST | `{"codes":["510300"]}` | 名称、规模、费率、跟踪指数、行业分类 | 东方财富 |
+| `/api/etf/snapshot` | POST | `{"codes":["510300"]}` | 最新价、涨跌幅、成交额、折溢价 | 新浪 `hq.sinajs.cn` |
+| `/api/etf/performance` | POST | `{"codes":["510300"]}` | 1周/1月/3月/6月/1年涨跌幅 | 新浪 K 线接口 |
 
 ---
 
@@ -139,8 +154,15 @@ git push
 
 # 2. Vercel 自动部署
 # 3. 设置环境变量：DIFY_API_KEY = app-xxxxxxxxxxxxxx
-# 4. Dify 导出 Workflow DSL
+# 4. Dify 导入 DSL：dify/workflow-dsl.yml
 ```
+
+### 重建 Dify Workflow
+
+1. 注册 [cloud.dify.ai](https://cloud.dify.ai) → 创建空白 Workflow
+2. 右上角 ... → 导入 DSL → 选择 `dify/workflow-dsl.yml`
+3. 3 个 HTTP 节点 URL 改为你自己的 Vercel 域名
+4. 发布即可
 
 ---
 
