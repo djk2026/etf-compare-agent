@@ -18,7 +18,7 @@ export default async function handler(req, res) {
   }
 
   try {
-    const response = await fetch('https://udify.app/api/workflows/run', {
+    const response = await fetch('https://api.dify.ai/v1/workflows/run', {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${DIFY_API_KEY}`,
