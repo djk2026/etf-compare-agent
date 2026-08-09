@@ -520,7 +520,7 @@ def calculate_tracking_error(etf_kline: list, index_kline: list) -> Optional[flo
     return round(annualized, 6)
 
 
-def _fetch_single_performance(code: str, days: int = 250,
+def _fetch_single_performance(code: str, days: int = 260,
                               tracking_index: Optional[str] = None) -> Optional[dict]:
     kline_symbol = resolve_kline_symbol(code)
     url = (
@@ -564,7 +564,7 @@ def fetch_performances(codes: list[str]) -> dict[str, Optional[dict]]:
     results = {}
     with ThreadPoolExecutor(max_workers=min(len(codes), 5)) as executor:
         futures = {
-            executor.submit(_fetch_single_performance, code, 250): code
+            executor.submit(_fetch_single_performance, code, 260): code
             for code in codes
         }
         for future in as_completed(futures, timeout=12):
