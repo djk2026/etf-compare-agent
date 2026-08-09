@@ -410,10 +410,7 @@ workflow:
           year1\") if p else None,\n            \"跟踪误差\": p.get(\"tracking_error\") if p else None,\n        }\n        etfs.append(etf)\n\n    # 5.\
           \ 构建简洁的结构化矩阵\n    lines = []\n    lines.append(\"## ETF 对比数据矩阵\\n\")\n \
           \   for etf in etfs:\n        name = etf.get(\"名称\")\n        lines.append(f\"\
-          ### {name}({etf['代码']})\")\n        for key in [\"跟踪指数\", \"行业分类\", \"基金公司\"\
-          , \"基金规模\", \"管理费率\", \"托管费率\", \"综合费率\", \"成立日期\",\n                     \"最新价\", \"今日涨跌幅\"\
-          , \"今日成交额\", \"折溢价率\", \"跟踪误差\",\n                     \"近1周收益\", \"近1月收益\", \"近3月收益\"\
-          , \"近6月收益\", \"近1年收益\"]:\n            val = etf.get(key)\n            if\
+          ### {name}({etf['代码']})\")\n        for key in [\"跟踪指数\", \"基金公司\", \"成立日期\", \"行业分类\",\n                     \"跟踪误差\", \"综合费率\", \"管理费率\", \"托管费率\", \"基金规模\",\n                     \"最新价\", \"今日涨跌幅\", \"折溢价率\", \"今日成交额\",\n                     \"近1周收益\", \"近1月收益\", \"近3月收益\", \"近6月收益\", \"近1年收益\"]:\n            val = etf.get(key)\n            if\
           \ val is not None:\n                if isinstance(val, float):\n       \
           \             val = f\"{val:.4f}\" if key == \"跟踪误差\" else f\"{val:+.4f}\"\n                lines.append(f\"- {key}:\
           \ {val}\")\n            else:\n                lines.append(f\"- {key}:\
