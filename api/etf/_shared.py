@@ -151,6 +151,22 @@ INDEX_KEYWORDS = [
     ("国防", "国防指数"),
 ]
 
+# 跟踪指数名称 → 新浪指数代码（仅收录已验证可用的主流指数；未收录的跟踪误差返回暂无数据）
+INDEX_CODE_MAP = {
+    "沪深300指数": "sh000300",
+    "中证500指数": "sh000905",
+    "中证1000指数": "sh000852",
+    "上证50指数": "sh000016",
+    "上证180指数": "sh000010",
+    "上证综合指数": "sh000001",
+    "科创50指数": "sh000688",
+    "创业板指数": "sz399006",
+    "创业板50指数": "sz399673",
+    "深证100指数": "sz399330",
+    "深证成份指数": "sz399001",
+    "中证红利指数": "sh000922",
+}
+
 
 def extract_management_company(name: str) -> Optional[str]:
     for kw, full_name in COMPANY_KEYWORDS:
@@ -261,7 +277,7 @@ def fetch_fund_list() -> dict[str, dict]:
 
     _fund_list_cache = result
     _fund_list_cache_time = time.time()
-    logger.info(f"基金列表已缓存，共 {len(result)} 只 A 股 ETF")
+    logger.info(f"基金列表已缓存，共 {len(result)} 只 ETF")
     return result
 
 
@@ -293,23 +309,40 @@ def fetch_fund_detail(code: str) -> dict:
             except (json.JSONDecodeError, ValueError, IndexError):
                 pass
 
+    # f10 基金概况页：一页同时拿「成立日期 + 管理费率 + 托管费率」
     try:
-        html_url = f"http://fund.eastmoney.com/{code}.html"
-        req = urllib.request.Request(html_url, headers=HEADERS_EASTMONEY)
+        f10_url = f"http://fundf10.eastmoney.com/jbgk_{code}.html"
+        req = urllib.request.Request(f10_url, headers=HEADERS_EASTMONEY)
         with urllib.request.urlopen(req, timeout=10) as resp:
             html = resp.read().decode("utf-8", errors="replace")
-        for keyword in ["成立日期", "成立时间"]:
-            idx = html.find(keyword)
-            if idx > 0:
-                snippet = html[idx:idx + 200]
-                m_date = re.search(r"(\d{4}[年\-/]\d{1,2}[月\-/]\d{1,2}[日]?)", snippet)
-                if m_date:
-                    date_str = m_date.group(1)
-                    date_str = date_str.replace("年", "-").replace("月", "-").replace("日", "")
-                    result["establishment_date"] = date_str
-                    break
+
+        # 成立日期在页面上有两种形态：<span>2012-05-04</span> 或 <td>2012年05月04日 / ...</td>
+        m_date = re.search(r"成立日期：<span>([^<]+)</span>", html)
+        if not m_date:
+            m_date = re.search(r"成立日期/规模</th><td>([^<]+)</td>", html)
+        if m_date:
+            date_str = re.sub(r"(\d{4})年(\d{1,2})月(\d{1,2})日", r"\1-\2-\3", m_date.group(1))
+            m_iso = re.search(r"\d{4}-\d{1,2}-\d{1,2}", date_str)
+            if m_iso:
+                result["established_date"] = m_iso.group(0)
+
+        def _extract_fee_pct(keyword: str) -> Optional[float]:
+            m = re.search(re.escape(keyword) + r"</th><td>([^<]+)</td>", html)
+            if not m:
+                return None
+            num = re.search(r"(\d+(?:\.\d+)?)", m.group(1))
+            return float(num.group(1)) if num else None
+
+        mgmt_pct = _extract_fee_pct("管理费率")
+        custody_pct = _extract_fee_pct("托管费率")
+        if mgmt_pct is not None:
+            result["management_fee"] = f"{mgmt_pct}%"
+        if custody_pct is not None:
+            result["custody_fee"] = f"{custody_pct}%"
+        if mgmt_pct is not None and custody_pct is not None:
+            result["fee_rate"] = f"{round(mgmt_pct + custody_pct, 4)}%"
     except Exception as e:
-        logger.warning(f"获取 {code} HTML 页面失败: {e}")
+        logger.warning(f"获取 {code} f10 概况页失败: {e}")
 
     return result
 
@@ -428,7 +461,67 @@ def calculate_returns(kline_data: list[dict]) -> dict[str, Optional[float]]:
     }
 
 
-def _fetch_single_performance(code: str, days: int = 250) -> Optional[dict]:
+# ── 指数 K 线与跟踪误差 ───────────────────────────────────────
+
+def fetch_index_kline(symbol: str, days: int = 250) -> Optional[list]:
+    """抓取指数日 K 线（新浪接口，返回格式与 ETF K 线一致）"""
+    url = (
+        "http://money.finance.sina.com.cn/quotes_service/api/json_v2.php/"
+        f"CN_MarketData.getKLineData?symbol={symbol}&scale=240&datalen={days}"
+    )
+    try:
+        req = urllib.request.Request(url, headers=HEADERS_SINA)
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            raw = resp.read().decode("gbk")
+        data = json.loads(raw)
+        if isinstance(data, list) and len(data) > 0:
+            return data
+    except Exception as e:
+        logger.warning(f"获取指数 {symbol} K 线失败: {e}")
+    return None
+
+
+def calculate_tracking_error(etf_kline: list, index_kline: list) -> Optional[float]:
+    """近似跟踪误差（年化）：
+    用 ETF 收盘价与指数收盘价逐日收益率之差的年化标准差。
+    注意：基于场内价格计算，含折溢价噪声，仅作参考。
+    样本不足 20 个交易日时返回 None（新上市 ETF 无跟踪误差）。
+    """
+    if not etf_kline or not index_kline:
+        return None
+    if len(etf_kline) < 20 or len(index_kline) < 20:
+        return None
+    try:
+        etf_close = {d["day"]: float(d["close"]) for d in etf_kline}
+        index_close = {d["day"]: float(d["close"]) for d in index_kline}
+    except (KeyError, ValueError):
+        return None
+
+    common_days = sorted(set(etf_close) & set(index_close))
+    if len(common_days) < 20:
+        return None
+
+    diffs = []
+    for prev, cur in zip(common_days, common_days[1:]):
+        try:
+            if etf_close[prev] == 0 or index_close[prev] == 0:
+                continue
+            etf_ret = (etf_close[cur] - etf_close[prev]) / etf_close[prev]
+            index_ret = (index_close[cur] - index_close[prev]) / index_close[prev]
+            diffs.append(etf_ret - index_ret)
+        except (KeyError, ValueError):
+            continue
+    if len(diffs) < 20:
+        return None
+
+    mean = sum(diffs) / len(diffs)
+    var = sum((d - mean) ** 2 for d in diffs) / len(diffs)
+    annualized = (var ** 0.5) * (252 ** 0.5)
+    return round(annualized, 6)
+
+
+def _fetch_single_performance(code: str, days: int = 250,
+                              tracking_index: Optional[str] = None) -> Optional[dict]:
     kline_symbol = resolve_kline_symbol(code)
     url = (
         "http://money.finance.sina.com.cn/quotes_service/api/json_v2.php/"
@@ -444,7 +537,23 @@ def _fetch_single_performance(code: str, days: int = 250) -> Optional[dict]:
         returns = calculate_returns(data)
         if not returns:
             return None
-        return {"name": "", "returns": returns}
+        result = {"name": "", "returns": returns}
+
+        # 跟踪指数懒加载：优先用传入值；无则从基金列表按需查找（首次命中触发缓存加载，后续命中直接读缓存）
+        if not tracking_index:
+            try:
+                fund_list = fetch_fund_list()
+                fund = fund_list.get(code)
+                if fund:
+                    tracking_index = fund.get("tracking_index")
+            except Exception:
+                pass
+
+        index_symbol = INDEX_CODE_MAP.get(tracking_index or "")
+        if index_symbol:
+            index_kline = fetch_index_kline(index_symbol, days)
+            result["tracking_error"] = calculate_tracking_error(data, index_kline) if index_kline else None
+        return result
     except Exception as e:
         logger.warning(f"获取 {code} K 线数据失败: {e}")
         return None
@@ -454,7 +563,10 @@ def fetch_performances(codes: list[str]) -> dict[str, Optional[dict]]:
     """并发获取多只 ETF 历史表现（适应 Vercel 10s 超时限制）"""
     results = {}
     with ThreadPoolExecutor(max_workers=min(len(codes), 5)) as executor:
-        futures = {executor.submit(_fetch_single_performance, code): code for code in codes}
+        futures = {
+            executor.submit(_fetch_single_performance, code, 250): code
+            for code in codes
+        }
         for future in as_completed(futures, timeout=12):
             code = futures[future]
             try:

@@ -38,12 +38,20 @@ class handler(BaseHTTPRequestHandler):
                     "fund_type": fund.get("fund_type_raw", "ETF"),
                     "management_company": fund.get("management_company"),
                     "fund_size": None,
+                    "established_date": None,
                     "establishment_date": None,
+                    "management_fee": None,
+                    "custody_fee": None,
+                    "fee_rate": None,
                 }
                 detail = fetch_fund_detail(code)
                 if detail:
                     entry["fund_size"] = detail.get("fund_size")
-                    entry["establishment_date"] = detail.get("establishment_date")
+                    entry["established_date"] = detail.get("established_date")
+                    entry["establishment_date"] = detail.get("established_date")
+                    entry["management_fee"] = detail.get("management_fee")
+                    entry["custody_fee"] = detail.get("custody_fee")
+                    entry["fee_rate"] = detail.get("fee_rate")
                 results[code] = entry
 
             self._send_json(results)

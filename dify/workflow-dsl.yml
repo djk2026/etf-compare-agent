@@ -399,8 +399,7 @@ workflow:
           名称\": b.get(\"name\"),\n            \"基金公司\": b.get(\"management_company\"\
           ),\n            \"跟踪指数\": b.get(\"tracking_index\"),\n            \"行业分类\"\
           : b.get(\"industry\"),\n            \"基金规模\": b.get(\"fund_size\"),\n  \
-          \          \"管理费率\": b.get(\"management_fee\"),\n            \"成立日期\": b.get(\"\
-          established_date\"),\n            \"最新价\": s.get(\"price\"),\n         \
+          \          \"管理费率\": b.get(\"management_fee\"),\n            \"托管费率\": b.get(\"custody_fee\"),\n            \"综合费率\": b.get(\"fee_rate\"),\n            \"成立日期\": b.get(\"established_date\"),\n            \"最新价\": s.get(\"price\"),\n         \
           \   \"今日涨跌幅\": s.get(\"change_percent\"),\n            \"今日成交额\": s.get(\"\
           volume\"),\n            \"折溢价率\": s.get(\"discount_premium\"),\n       \
           \     \"近1周收益\": p.get(\"returns\", {}).get(\"week1\") if p else None,\n\
@@ -408,15 +407,15 @@ workflow:
           \ None,\n            \"近3月收益\": p.get(\"returns\", {}).get(\"month3\") if\
           \ p else None,\n            \"近6月收益\": p.get(\"returns\", {}).get(\"month6\"\
           ) if p else None,\n            \"近1年收益\": p.get(\"returns\", {}).get(\"\
-          year1\") if p else None,\n        }\n        etfs.append(etf)\n\n    # 5.\
+          year1\") if p else None,\n            \"跟踪误差\": p.get(\"tracking_error\") if p else None,\n        }\n        etfs.append(etf)\n\n    # 5.\
           \ 构建简洁的结构化矩阵\n    lines = []\n    lines.append(\"## ETF 对比数据矩阵\\n\")\n \
           \   for etf in etfs:\n        name = etf.get(\"名称\")\n        lines.append(f\"\
           ### {name}({etf['代码']})\")\n        for key in [\"跟踪指数\", \"行业分类\", \"基金公司\"\
-          , \"基金规模\", \"管理费率\", \"成立日期\",\n                     \"最新价\", \"今日涨跌幅\"\
-          , \"今日成交额\", \"折溢价率\",\n                     \"近1周收益\", \"近1月收益\", \"近3月收益\"\
+          , \"基金规模\", \"管理费率\", \"托管费率\", \"综合费率\", \"成立日期\",\n                     \"最新价\", \"今日涨跌幅\"\
+          , \"今日成交额\", \"折溢价率\", \"跟踪误差\",\n                     \"近1周收益\", \"近1月收益\", \"近3月收益\"\
           , \"近6月收益\", \"近1年收益\"]:\n            val = etf.get(key)\n            if\
           \ val is not None:\n                if isinstance(val, float):\n       \
-          \             val = f\"{val:+.4f}\"\n                lines.append(f\"- {key}:\
+          \             val = f\"{val:.4f}\" if key == \"跟踪误差\" else f\"{val:+.4f}\"\n                lines.append(f\"- {key}:\
           \ {val}\")\n            else:\n                lines.append(f\"- {key}:\
           \ 暂无数据\")\n        lines.append(\"\")\n\n    # 6. 附加错误信息\n    error_parts\
           \ = []\n    if basic_rate < 0.5:\n        error_parts.append(\"基本信息\")\n\
@@ -502,7 +501,11 @@ workflow:
 
             2. 禁止编造数据。只基于提供的真实数据，缺失数据标注"暂无数据"
 
-            3. 必须用白话解释专业术语。如出现"跟踪误差"、"折溢价"等，要加简短解释
+            3. 必须用白话解释以下关键术语：
+            - 跟踪误差：反映 ETF 复制指数的精准度，越小越准。被动 ETF 通常 < 0.5%，若 > 3% 需特别说明风险
+            - 综合费率：管理费 + 托管费（两者每年从净值中扣除），是持有 ETF 的核心成本。两只 ETF 费率相差 0.1% 以上时，应计算 5 年累计成本差异
+            - 折溢价率：ETF 市价 vs 实时净值的偏差，正值 = 买贵了，负值 = 买便宜了
+            - 其他如"管理费率""托管费率""成立日期"也需简短白话解释
 
             4. 底部必须标注："数据来源：新浪财经 / 东方财富公开数据，延迟约 15-30 分钟，仅供参考"
 

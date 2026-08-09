@@ -36,6 +36,7 @@ class handler(BaseHTTPRequestHandler):
                         "code": code,
                         "name": data.get("name"),
                         "returns": data.get("returns"),
+                        "tracking_error": data.get("tracking_error"),
                     }
 
             self._send_json(results)
