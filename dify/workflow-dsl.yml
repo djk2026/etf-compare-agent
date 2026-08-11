@@ -412,7 +412,7 @@ workflow:
           \   for etf in etfs:\n        name = etf.get(\"名称\")\n        lines.append(f\"\
           ### {name}({etf['代码']})\")\n        for key in [\"跟踪指数\", \"基金公司\", \"成立日期\", \"行业分类\",\n                     \"跟踪误差\", \"管理费率\", \"托管费率\", \"综合费率\", \"基金规模\",\n                     \"最新价\", \"今日涨跌幅\", \"今日成交额\",\n                     \"近1周收益\", \"近1月收益\", \"近3月收益\", \"近6月收益\", \"近1年收益\"]:\n            val = etf.get(key)\n            if\
           \ val is not None:\n                if isinstance(val, float):\n       \
-          \             val = f\"{val:.4f}\" if key == \"跟踪误差\" else f\"{val:+.4f}\"\n                lines.append(f\"- {key}:\
+          \             # 区分数据语义：涨跌幅/收益率（有正负方向）vs 规模/价格/成交额（绝对值）\n                    if key in (\"今日涨跌幅\", \"近1周收益\", \"近1月收益\", \"近3月收益\", \"近6月收益\", \"近1年收益\"):\n                        val = f\"{val:+.4f}\"\n                    elif key == \"基金规模\":\n                        val = f\"{val:.2f} 亿元\"\n                    elif key == \"最新价\":\n                        val = f\"{val:.4f} 元\"\n                    elif key == \"今日成交额\":\n                        if abs(val) >= 1e8:\n                            val = f\"{val/1e8:.2f} 亿元\"\n                        else:\n                            val = f\"{val:.0f} 元\"\n                    else:\n                        val = f\"{val:.4f}\"\n                lines.append(f\"- {key}:\
           \ {val}\")\n            else:\n                lines.append(f\"- {key}:\
           \ 暂无数据\")\n        lines.append(\"\")\n\n    # 6. 附加错误信息\n    error_parts\
           \ = []\n    if basic_rate < 0.5:\n        error_parts.append(\"基本信息\")\n\
@@ -489,6 +489,8 @@ workflow:
         - id: ea0f6d62-5145-4b08-b7fa-1d49e4d85f52
           role: system
           text: '你是一个专业的 ETF 对比分析助手。你的任务是基于真实数据，帮用户对比多只 ETF 的核心维度差异。
+
+            当前实际日期为 2026 年 08 月（你处在 2026 年，不是 2025 年）。请以此为基准判断数据中的日期是否正常，不要将 2026 年的日期误判为"未来日期"。
 
 
             ## 行为准则
