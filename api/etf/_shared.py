@@ -346,7 +346,8 @@ def fetch_fund_detail(code: str) -> dict:
             result["fee_rate"] = f"{round(mgmt_pct + custody_pct, 4)}%"
 
         # 直接从页面提取跟踪标的（优先于关键词匹配，避免"酒/白酒"混淆）
-        m_track = re.search(r"跟踪标的</td><td>([^<]+)</td>", html)
+        # 页面结构: <th>跟踪标的</th><td>中证酒指数</td>
+        m_track = re.search(r"跟踪标的</th><td>([^<]+)</td>", html)
         if m_track:
             result["tracking_index"] = m_track.group(1).strip()
     except Exception as e:
