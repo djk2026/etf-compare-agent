@@ -168,6 +168,8 @@ INDEX_CODE_MAP = {
     "中证红利指数": "sh000922",
     "证券公司指数": "sz399975",
     "中证酒指数": "sz399987",
+    "国证半导体芯片指数": "sz980017",  # 国证芯片（新浪行情代码，注意 399995 是基建工程）
+    "芯片指数": "sz980017",  # 基金列表关键词匹配的宽松名，兜底用
 }
 
 
@@ -213,7 +215,7 @@ def infer_industry(name: str, fund_type: str) -> Optional[str]:
 
 _fund_list_cache: Optional[dict] = None
 _fund_list_cache_time: float = 0
-CACHE_TTL = 600
+CACHE_TTL = 3600  # 基金列表缓存 1 小时，避免每次冷启动都重新下载 2MB 列表
 
 
 def fetch_fund_list() -> dict[str, dict]:
@@ -227,7 +229,7 @@ def fetch_fund_list() -> dict[str, dict]:
     req = urllib.request.Request(url, headers=HEADERS_EASTMONEY)
 
     try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
+        with urllib.request.urlopen(req, timeout=20) as resp:
             raw = resp.read().decode("utf-8", errors="replace")
     except Exception as e:
         logger.error(f"下载基金列表失败: {e}")
@@ -287,16 +289,26 @@ def fetch_fund_list() -> dict[str, dict]:
 # ── 基金详情（规模、成立日期）──────────────────────────────
 
 def fetch_fund_detail(code: str) -> dict:
-    url = f"http://fund.eastmoney.com/pingzhongdata/{code}.js"
-    result = {}
+    """并行下载 pingzhongdata（规模）+ f10 概况页（成立日期/费率/跟踪标的）"""
+    pz_url = f"http://fund.eastmoney.com/pingzhongdata/{code}.js"
+    f10_url = f"http://fundf10.eastmoney.com/jbgk_{code}.html"
 
-    try:
-        req = urllib.request.Request(url, headers=HEADERS_EASTMONEY)
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            raw = resp.read().decode("utf-8", errors="replace")
-    except Exception as e:
-        logger.warning(f"获取 {code} pingzhongdata 失败: {e}")
-        raw = ""
+    def _get(url: str, timeout: int) -> str:
+        try:
+            req = urllib.request.Request(url, headers=HEADERS_EASTMONEY)
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                return resp.read().decode("utf-8", errors="replace")
+        except Exception as e:
+            logger.warning(f"获取 {code} {url} 失败: {e}")
+            return ""
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        f_pz = executor.submit(_get, pz_url, 10)
+        f_f10 = executor.submit(_get, f10_url, 10)
+        raw = f_pz.result()
+        html = f_f10.result()
+
+    result = {}
 
     if raw:
         m_alloc = re.search(r"Data_assetAllocation\s*=\s*(\{[\s\S]*?\});", raw)
@@ -314,11 +326,6 @@ def fetch_fund_detail(code: str) -> dict:
 
     # f10 基金概况页：一页同时拿「成立日期 + 管理费率 + 托管费率」
     try:
-        f10_url = f"http://fundf10.eastmoney.com/jbgk_{code}.html"
-        req = urllib.request.Request(f10_url, headers=HEADERS_EASTMONEY)
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            html = resp.read().decode("utf-8", errors="replace")
-
         # 成立日期在页面上有两种形态：<span>2012-05-04</span> 或 <td>2012年05月04日 / ...</td>
         m_date = re.search(r"成立日期：<span>([^<]+)</span>", html)
         if not m_date:
@@ -480,7 +487,7 @@ def fetch_index_kline(symbol: str, days: int = 250) -> Optional[list]:
     )
     try:
         req = urllib.request.Request(url, headers=HEADERS_SINA)
-        with urllib.request.urlopen(req, timeout=15) as resp:
+        with urllib.request.urlopen(req, timeout=10) as resp:
             raw = resp.read().decode("gbk")
         data = json.loads(raw)
         if isinstance(data, list) and len(data) > 0:
@@ -537,7 +544,7 @@ def fetch_etf_nav(code: str) -> Optional[list]:
     url = f"http://fund.eastmoney.com/pingzhongdata/{code}.js"
     try:
         req = urllib.request.Request(url, headers=HEADERS_EASTMONEY)
-        with urllib.request.urlopen(req, timeout=15) as resp:
+        with urllib.request.urlopen(req, timeout=10) as resp:
             raw = resp.read().decode("utf-8")
         m = re.search(r'Data_netWorthTrend\s*=\s*(\[.*?\}\s*\]);', raw)
         if not m:
@@ -566,43 +573,74 @@ def fetch_etf_nav(code: str) -> Optional[list]:
 
 def _fetch_single_performance(code: str, days: int = 260,
                               tracking_index: Optional[str] = None) -> Optional[dict]:
+    """单只 ETF 历史表现（两阶段并行，缩短最坏耗时）：
+    阶段1：K线 + 跟踪指数解析 并行；阶段2：指数K线 + 净值 并行。
+    """
     kline_symbol = resolve_kline_symbol(code)
-    url = (
+    kline_url = (
         "http://money.finance.sina.com.cn/quotes_service/api/json_v2.php/"
         f"CN_MarketData.getKLineData?symbol={kline_symbol}&scale=240&datalen={days}"
     )
-    try:
-        req = urllib.request.Request(url, headers=HEADERS_SINA)
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            raw = resp.read().decode("gbk")
-        data = json.loads(raw)
-        if not isinstance(data, list) or len(data) == 0:
-            return None
-        returns = calculate_returns(data)
-        if not returns:
-            return None
-        result = {"name": "", "returns": returns}
 
-        # 跟踪指数懒加载：优先用传入值；无则从基金列表按需查找（首次命中触发缓存加载，后续命中直接读缓存）
-        if not tracking_index:
-            try:
-                fund_list = fetch_fund_list()
-                fund = fund_list.get(code)
-                if fund:
-                    tracking_index = fund.get("tracking_index")
-            except Exception:
-                pass
+    def _fetch_kline():
+        try:
+            req = urllib.request.Request(kline_url, headers=HEADERS_SINA)
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                return json.loads(resp.read().decode("gbk"))
+        except Exception as e:
+            logger.warning(f"获取 {code} K 线数据失败: {e}")
+            return None
 
-        index_symbol = INDEX_CODE_MAP.get(tracking_index or "")
-        if index_symbol:
-            index_kline = fetch_index_kline(index_symbol, days)
-            if index_kline:
-                nav_data = fetch_etf_nav(code)
-                result["tracking_error"] = calculate_tracking_error(nav_data, index_kline) if nav_data else None
-        return result
-    except Exception as e:
-        logger.warning(f"获取 {code} K 线数据失败: {e}")
+    def _resolve_tracking_index():
+        if tracking_index:
+            return tracking_index
+        # 首选 f10 概况页（44KB，远快于全量基金列表 2MB），且数据来自官方页面更准
+        try:
+            f10_url = f"http://fundf10.eastmoney.com/jbgk_{code}.html"
+            req = urllib.request.Request(f10_url, headers=HEADERS_EASTMONEY)
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                html = resp.read().decode("utf-8", errors="replace")
+            m_track = re.search(r"跟踪标的</th><td>([^<]+)</td>", html)
+            if m_track:
+                return m_track.group(1).strip()
+        except Exception:
+            pass
+        # 兜底：基金列表关键词匹配
+        try:
+            fund_list = fetch_fund_list()
+            fund = fund_list.get(code)
+            return fund.get("tracking_index") if fund else None
+        except Exception:
+            return None
+
+    # 阶段1：K线 与 跟踪指数解析 并行（fund list 冷启动慢时以 12s 为限，超时不阻塞主流程）
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        f_kline = executor.submit(_fetch_kline)
+        f_track = executor.submit(_resolve_tracking_index)
+        data = f_kline.result(timeout=12)
+        try:
+            resolved_track = f_track.result(timeout=12)
+        except Exception:
+            resolved_track = None
+
+    if not isinstance(data, list) or len(data) == 0:
         return None
+    returns = calculate_returns(data)
+    if not returns:
+        return None
+    result = {"name": "", "returns": returns}
+
+    # 阶段2：指数K线 与 净值 并行（仅当跟踪指数命中 INDEX_CODE_MAP）
+    index_symbol = INDEX_CODE_MAP.get(resolved_track or "")
+    if index_symbol:
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            f_idx = executor.submit(fetch_index_kline, index_symbol, days)
+            f_nav = executor.submit(fetch_etf_nav, code)
+            index_kline = f_idx.result(timeout=12)
+            nav_data = f_nav.result(timeout=12)
+        if index_kline and nav_data:
+            result["tracking_error"] = calculate_tracking_error(nav_data, index_kline)
+    return result
 
 
 def fetch_performances(codes: list[str]) -> dict[str, Optional[dict]]:
@@ -613,7 +651,7 @@ def fetch_performances(codes: list[str]) -> dict[str, Optional[dict]]:
             executor.submit(_fetch_single_performance, code, 260): code
             for code in codes
         }
-        for future in as_completed(futures, timeout=12):
+        for future in as_completed(futures, timeout=25):
             code = futures[future]
             try:
                 results[code] = future.result()
