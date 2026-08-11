@@ -402,35 +402,13 @@ workflow:
           , {}).get(\"month3\") if p else None,\n            \"近6月收益\": p.get(\"returns\"\
           , {}).get(\"month6\") if p else None,\n            \"近1年收益\": p.get(\"returns\"\
           , {}).get(\"year1\") if p else None,\n            \"跟踪误差\": p.get(\"tracking_error\"\
-          ) if p else None,\n        }\n        etfs.append(etf)\n\n    # 5. 构建简洁的结构化矩阵\n\
-          \    lines = []\n    lines.append(\"## ETF 对比数据矩阵\\n\")\n    for etf in\
-          \ etfs:\n        name = etf.get(\"名称\")\n        lines.append(f\"### {name}({etf['代码']})\"\
-          )\n        for key in [\"跟踪指数\", \"基金公司\", \"成立日期\", \"行业分类\",\n       \
-          \              \"跟踪误差\", \"管理费率\", \"托管费率\", \"综合费率\", \"基金规模\",\n     \
-          \                \"最新价\", \"今日涨跌幅\", \"今日成交额\",\n                     \"\
-          近1周收益\", \"近1月收益\", \"近3月收益\", \"近6月收益\", \"近1年收益\"]:\n            val =\
-          \ etf.get(key)\n            if val is not None:\n                if isinstance(val,\
-          \ float):\n                    # 区分数据语义：涨跌幅/收益率（有正负方向）vs 规模/价格/成交额（绝对值）\n\
-          \                    if key in (\"今日涨跌幅\", \"近1周收益\", \"近1月收益\", \"近3月收益\"\
-          , \"近6月收益\", \"近1年收益\"):\n                        val = f\"{val:+.4f}\"\n\
-          \                    elif key == \"基金规模\":\n                        val\
-          \ = f\"{val:.2f} 亿元\"\n                    elif key == \"最新价\":\n      \
-          \                  val = f\"{val:.4f} 元\"\n                    elif key\
-          \ == \"今日成交额\":\n                        if abs(val) >= 1e8:\n         \
-          \                   val = f\"{val/1e8:.2f} 亿元\"\n                      \
-          \  else:\n                            val = f\"{val:.0f} 元\"\n         \
-          \           elif key == \"跟踪误差\":\n                        val = f\"{val*100:.2f}%\"\n                    else:\n                        val = f\"{val:.4f}\"\n      \
-          \          lines.append(f\"- {key}: {val}\")\n            else:\n      \
-          \          lines.append(f\"- {key}: 暂无数据\")\n        lines.append(\"\")\n\
-          \n    # 6. 附加错误信息\n    error_parts = []\n    if basic_rate < 0.5:\n    \
-          \    error_parts.append(\"基本信息\")\n    if snap_rate < 0.5:\n        error_parts.append(\"\
-          实时行情\")\n    if perf_rate < 0.5:\n        error_parts.append(\"历史业绩\")\n\
-          \n    if error_parts:\n        lines.append(f\"---\\n> ⚠️ 以下维度数据暂不可用：{'、'.join(error_parts)}\"\
-          )\n\n    return {\n        \"comparison_data\": \"\\n\".join(lines),\n \
-          \       \"has_data\": \"true\",\n        \"error_message\": None\n    }"
+          ) if p else None,\n        }\n        etfs.append(etf)\n\n    # 5. # 5. 构建 Markdown 对比表格（17 维度 × N 只 ETF，LLM 直接使用）\n\n    FIELD_ORDER = [\"跟踪指数\", \"基金公司\", \"成立日期\", \"行业分类\",\n                   \"跟踪误差\", \"管理费率\", \"托管费率\", \"综合费率\", \"基金规模\",\n                   \"最新价\", \"今日涨跌幅\", \"今日成交额\",\n                   \"近1周收益\", \"近1月收益\", \"近3月收益\", \"近6月收益\", \"近1年收益\"]\n\n    header_cols = [\"对比维度\"] + [f\"{etf.get('名称', '')}({etf.get('代码', '')})\" for etf in etfs]\n    lines = [\"## ETF 对比数据表格\\n\"]\n    lines.append(\"| \" + \" | \".join(header_cols) + \" |\")\n    lines.append(\"|\" + \"|\".join([\" :--- \"] * len(header_cols)) + \"|\")\n\n    for key in FIELD_ORDER:\n        row = [key]\n        for etf in etfs:\n            val = etf.get(key)\n            if val is None:\n                row.append(\"暂无数据\")\n            elif isinstance(val, float):\n                if key in (\"今日涨跌幅\", \"近1周收益\", \"近1月收益\", \"近3月收益\", \"近6月收益\", \"近1年收益\"):\n                    row.append(f\"{val:+.4f}\")\n                elif key == \"基金规模\":\n                    row.append(f\"{val:.2f} 亿元\")\n                elif key == \"最新价\":\n                    row.append(f\"{val:.4f} 元\")\n                elif key == \"今日成交额\":\n                    if abs(val) >= 1e8:\n                        row.append(f\"{val/1e8:.2f} 亿元\")\n                    else:\n                        row.append(f\"{val:.0f} 元\")\n                elif key == \"跟踪误差\":\n                    row.append(f\"{val*100:.2f}%\")\n                else:\n                    row.append(f\"{val:.4f}\")\n            else:\n                row.append(str(val))\n        lines.append(\"| \" + \" | \".join(row) + \" |\")\n\n    lines.append(\"\")\n\n    # 6. 附加错误信息\n    error_parts = []\n    if basic_rate < 0.5:\n        error_parts.append(\"基本信息\")\n    if snap_rate < 0.5:\n        error_parts.append(\"实时行情\")\n    if perf_rate < 0.5:\n        error_parts.append(\"历史业绩\")\n\n    if error_parts:\n        lines.append(f\"---\\n> ⚠️ 以下维度数据暂不可用：{'、'.join(error_parts)}\")\n\n    from datetime import datetime\n    return {\n        \"comparison_data\": \"\\n\".join(lines),\n        \"current_date\": datetime.now().strftime(\"%Y 年 %m 月\"),\n        \"has_data\": \"true\",\n        \"error_message\": None\n    }"
         code_language: python3
         outputs:
           comparison_data:
+            children: null
+            type: string
+          current_date:
             children: null
             type: string
           error_message:
@@ -504,6 +482,10 @@ workflow:
             variable: error_message
           - value_selector:
             - '1785916505938'
+            - current_date
+            variable: current_date
+          - value_selector:
+            - '1785916505938'
             - has_data
             variable: has_data
           - value_selector:
@@ -558,7 +540,7 @@ workflow:
             **输入 2-5 只 ETF 时（对比模式）：**
 
             ### 对比总览
-            用 Markdown 表格列出对比维度
+            直接使用 <etf_raw_data> 中已提供的"ETF 对比数据表格"，一字不改地放入此章节。禁止修改表格结构、增删行或列。
 
             ### 逐只解读
             每只 ETF 一段话（不超过 5 行），突出该 ETF 在本轮对比中最显著的特点
@@ -567,7 +549,7 @@ workflow:
             围绕核心矛盾，选择差异最大的 2-3 个维度深入对比
 
             ### 注意事项
-            - 历史业绩不代表未来表现
+            - 历史业绩不代表未来表现（此条仅写这一句，不展开、不附加解释）
             - 根据本次对比结果，列出真正需要注意的风险点（禁止使用通用模板内容）
 
             ---
@@ -575,9 +557,9 @@ workflow:
             数据来源：新浪财经 / 东方财富公开数据，延迟约 15-30 分钟，仅供参考。不构成投资建议。'
         - edition_type: jinja2
           id: 2883889a-9c47-4b3c-ba62-5e4e11a0472b
-          jinja2_text: "当前实际日期为 2026 年 08 月。请以此为基准判断数据中的日期是否正常，不要将 2026 年的日期误判为\"未来日期\"。\r\n\r\n{% if has_data == \"false\" %}\r\n请直接告知用户：{{ error_message }} 严禁编造任何数据。\r\n{% else %}\r\n{% if warning %}\r\n> ⚠️ 重要提醒：{{ warning }}\r\n>\r\n> 请在报告的「注意事项」章节开头单独标注此提醒。\r\n{% endif %}\r\n\r\n请严格基于下方数据生成报告。全程遵守 SYSTEM 中的行为准则和输出格式要求。\r\n严禁脱离给定数据编造行情、收益、风险等未给出的信息。\r\n\r\n<etf_raw_data>\r\n{{ comparison_data }}\r\n</etf_raw_data>\r\n{% endif %}"
+          jinja2_text: "当前实际日期为 {{ current_date }}。请以此为基准判断数据中的日期是否正常，不要将 2026 年的日期误判为\"未来日期\"。\r\n\r\n{% if has_data == \"false\" %}\r\n请直接告知用户：{{ error_message }} 严禁编造任何数据。\r\n{% else %}\r\n{% if warning %}\r\n> ⚠️ 重要提醒：{{ warning }}\r\n>\r\n> 请在报告的「注意事项」章节开头单独标注此提醒。\r\n{% endif %}\r\n\r\n请严格基于下方数据生成报告。全程遵守 SYSTEM 中的行为准则和输出格式要求。\r\n严禁脱离给定数据编造行情、收益、风险等未给出的信息。\r\n\r\n<etf_raw_data>\r\n{{ comparison_data }}\r\n</etf_raw_data>\r\n{% endif %}"
           role: user
-          text: '当前实际日期为 2026 年 08 月。请以此为基准判断数据中的日期是否正常，不要将 2026 年的日期误判为"未来日期"。
+          text: '当前实际日期为 {{ current_date }}。请以此为基准判断数据中的日期是否正常，不要将 2026 年的日期误判为"未来日期"。
 
             {% if has_data == "false" %}
 
