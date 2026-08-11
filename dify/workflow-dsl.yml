@@ -557,9 +557,9 @@ workflow:
             数据来源：新浪财经 / 东方财富公开数据，延迟约 15-30 分钟，仅供参考。不构成投资建议。'
         - edition_type: jinja2
           id: 2883889a-9c47-4b3c-ba62-5e4e11a0472b
-          jinja2_text: "当前实际日期为 {{ current_date }}。请以此为基准判断数据中的日期是否正常，不要将 2026 年的日期误判为\"未来日期\"。\r\n\r\n{% if has_data == \"false\" %}\r\n请直接告知用户：{{ error_message }} 严禁编造任何数据。\r\n{% else %}\r\n{% if warning %}\r\n> ⚠️ 重要提醒：{{ warning }}\r\n>\r\n> 请在报告的「注意事项」章节开头单独标注此提醒。\r\n{% endif %}\r\n\r\n请严格基于下方数据生成报告。全程遵守 SYSTEM 中的行为准则和输出格式要求。\r\n严禁脱离给定数据编造行情、收益、风险等未给出的信息。\r\n\r\n<etf_raw_data>\r\n{{ comparison_data }}\r\n</etf_raw_data>\r\n{% endif %}"
+          jinja2_text: "(内部上下文，不必输出到报告中) 当前实际日期为 {{ current_date }}。请以此为基准判断数据中的日期是否正常，不要将 2026 年的日期误判为\"未来日期\"。\r\n\r\n{% if has_data == \"false\" %}\r\n请直接告知用户：{{ error_message }} 严禁编造任何数据。\r\n{% else %}\r\n{% if warning %}\r\n> ⚠️ 重要提醒：{{ warning }}\r\n>\r\n> 请在报告的「注意事项」章节开头单独标注此提醒。\r\n{% endif %}\r\n\r\n请严格基于下方数据生成报告。全程遵守 SYSTEM 中的行为准则和输出格式要求。\r\n严禁脱离给定数据编造行情、收益、风险等未给出的信息。\r\n\r\n<etf_raw_data>\r\n{{ comparison_data }}\r\n</etf_raw_data>\r\n{% endif %}"
           role: user
-          text: '当前实际日期为 {{ current_date }}。请以此为基准判断数据中的日期是否正常，不要将 2026 年的日期误判为"未来日期"。
+          text: '(内部上下文，不必输出到报告中) 当前实际日期为 {{ current_date }}。请以此为基准判断数据中的日期是否正常，不要将 2026 年的日期误判为"未来日期"。
 
             {% if has_data == "false" %}
 
