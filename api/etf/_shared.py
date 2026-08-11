@@ -9,6 +9,7 @@ import json
 import re
 import time
 import logging
+from datetime import datetime, timezone, timedelta
 from typing import Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -520,6 +521,33 @@ def calculate_tracking_error(etf_kline: list, index_kline: list) -> Optional[flo
     return round(annualized, 6)
 
 
+def fetch_etf_nav(code: str) -> Optional[list]:
+    """从东方财富 pingzhongdata JS 提取 ETF 每日单位净值，
+    返回 [{"day": "2026-08-11", "close": 1.4697}, ...]，兼容 calculate_tracking_error()
+    """
+    url = f"http://fund.eastmoney.com/pingzhongdata/{code}.js"
+    try:
+        req = urllib.request.Request(url, headers=HEADERS_EASTMONEY)
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            raw = resp.read().decode("utf-8")
+        m = re.search(r'Data_netWorthTrend\s*=\s*(\[.*?\}\s*\]);', raw)
+        if not m:
+            return None
+        data = json.loads(m.group(1))
+        tz = timezone(timedelta(hours=8))
+        result = []
+        for item in data:
+            ts = item.get("x")
+            nav = item.get("y")
+            if ts and nav:
+                day = datetime.fromtimestamp(ts / 1000, tz).strftime("%Y-%m-%d")
+                result.append({"day": day, "close": nav})
+        return result if result else None
+    except Exception as e:
+        logger.warning(f"获取 {code} 净值数据失败: {e}")
+        return None
+
+
 def _fetch_single_performance(code: str, days: int = 260,
                               tracking_index: Optional[str] = None) -> Optional[dict]:
     kline_symbol = resolve_kline_symbol(code)
@@ -552,7 +580,9 @@ def _fetch_single_performance(code: str, days: int = 260,
         index_symbol = INDEX_CODE_MAP.get(tracking_index or "")
         if index_symbol:
             index_kline = fetch_index_kline(index_symbol, days)
-            result["tracking_error"] = calculate_tracking_error(data, index_kline) if index_kline else None
+            if index_kline:
+                nav_data = fetch_etf_nav(code)
+                result["tracking_error"] = calculate_tracking_error(nav_data, index_kline) if nav_data else None
         return result
     except Exception as e:
         logger.warning(f"获取 {code} K 线数据失败: {e}")
@@ -561,8 +591,6 @@ def _fetch_single_performance(code: str, days: int = 260,
 
 def fetch_performances(codes: list[str]) -> dict[str, Optional[dict]]:
     """并发获取多只 ETF 历史表现（适应 Vercel 10s 超时限制）"""
-    if not codes:
-        return {}
     results = {}
     with ThreadPoolExecutor(max_workers=min(len(codes), 5)) as executor:
         futures = {
