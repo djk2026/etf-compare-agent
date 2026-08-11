@@ -52,6 +52,8 @@ class handler(BaseHTTPRequestHandler):
                     entry["management_fee"] = detail.get("management_fee")
                     entry["custody_fee"] = detail.get("custody_fee")
                     entry["fee_rate"] = detail.get("fee_rate")
+                    # 页面抓取的跟踪标的优先于关键词匹配（东方财富官方数据，避免"酒/白酒"混淆）
+                    entry["tracking_index"] = detail.get("tracking_index") or entry["tracking_index"]
                 results[code] = entry
 
             self._send_json(results)

@@ -166,6 +166,8 @@ INDEX_CODE_MAP = {
     "深证100指数": "sz399330",
     "深证成份指数": "sz399001",
     "中证红利指数": "sh000922",
+    "证券公司指数": "sz399975",
+    "中证酒指数": "sz399987",
 }
 
 
@@ -342,6 +344,11 @@ def fetch_fund_detail(code: str) -> dict:
             result["custody_fee"] = f"{custody_pct}%"
         if mgmt_pct is not None and custody_pct is not None:
             result["fee_rate"] = f"{round(mgmt_pct + custody_pct, 4)}%"
+
+        # 直接从页面提取跟踪标的（优先于关键词匹配，避免"酒/白酒"混淆）
+        m_track = re.search(r"跟踪标的</td><td>([^<]+)</td>", html)
+        if m_track:
+            result["tracking_index"] = m_track.group(1).strip()
     except Exception as e:
         logger.warning(f"获取 {code} f10 概况页失败: {e}")
 
