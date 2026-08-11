@@ -383,9 +383,7 @@ workflow:
           \            basic.get(c) and basic[c].get(\"error\") == \"invalid_code\"\n\
           \            for c in cleaned_codes\n        )\n        if all_invalid:\n\
           \            msg = f\"代码 {'、'.join(cleaned_codes)} 无效，请检查后重试。\"\n\
-          \        else:\n            msg = \"当前数据服务暂不可用，请稍后重试。\"\n        return {\n\
-          \            \"comparison_data\": \"\",\n            \"has_data\": \"false\"\
-          ,\n            \"error_message\": msg\n        }\n\n    # 4. 逐只聚合\n    etfs = []\n   \
+          \        else:\n            msg = \"当前数据服务暂不可用，请稍后重试。\"\n        return {\n            \"comparison_data\": \"\",\n            \"current_date\": \"\",\n            \"has_data\": \"false\"\n            ,\n            \"error_message\": msg\n        }\n\n    # 4. 逐只聚合\n    etfs = []\n   \
           \ for code in cleaned_codes:\n        b = basic.get(code, {}) or {}\n  \
           \      s = snapshot.get(code, {}) or {}\n        p = performance.get(code,\
           \ {}) or {}\n\n        etf = {\n            \"代码\": code,\n            \"\
