@@ -561,6 +561,8 @@ def _fetch_single_performance(code: str, days: int = 260,
 
 def fetch_performances(codes: list[str]) -> dict[str, Optional[dict]]:
     """并发获取多只 ETF 历史表现（适应 Vercel 10s 超时限制）"""
+    if not codes:
+        return {}
     results = {}
     with ThreadPoolExecutor(max_workers=min(len(codes), 5)) as executor:
         futures = {
