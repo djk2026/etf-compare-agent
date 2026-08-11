@@ -396,7 +396,7 @@ workflow:
           custody_fee\"),\n            \"综合费率\": b.get(\"fee_rate\"),\n          \
           \  \"成立日期\": b.get(\"established_date\"),\n            \"最新价\": s.get(\"\
           price\"),\n            \"今日涨跌幅\": s.get(\"change_percent\"),\n         \
-          \   \"今日成交额\": s.get(\"volume\"),\n            \"近1周收益\": p.get(\"returns\"\
+          \   \"今日成交额\": s.get(\"amount\"),\n            \"近1周收益\": p.get(\"returns\"\
           , {}).get(\"week1\") if p else None,\n            \"近1月收益\": p.get(\"returns\"\
           , {}).get(\"month1\") if p else None,\n            \"近3月收益\": p.get(\"returns\"\
           , {}).get(\"month3\") if p else None,\n            \"近6月收益\": p.get(\"returns\"\
