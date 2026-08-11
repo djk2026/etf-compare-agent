@@ -522,8 +522,9 @@ def calculate_tracking_error(etf_kline: list, index_kline: list) -> Optional[flo
 
 
 def fetch_etf_nav(code: str) -> Optional[list]:
-    """从东方财富 pingzhongdata JS 提取 ETF 每日单位净值，
-    返回 [{"day": "2026-08-11", "close": 1.4697}, ...]，兼容 calculate_tracking_error()
+    """从东方财富 pingzhongdata JS 提取 ETF 每日净值，
+    用 equityReturn（已复权日收益率）构建伪收盘价序列，
+    返回 [{"day": "2026-08-11", "close": 1.0000}, ...]，兼容 calculate_tracking_error()
     """
     url = f"http://fund.eastmoney.com/pingzhongdata/{code}.js"
     try:
@@ -536,13 +537,20 @@ def fetch_etf_nav(code: str) -> Optional[list]:
         data = json.loads(m.group(1))
         tz = timezone(timedelta(hours=8))
         result = []
+        prev_close = 1.0
         for item in data:
             ts = item.get("x")
-            nav = item.get("y")
-            if ts and nav:
-                day = datetime.fromtimestamp(ts / 1000, tz).strftime("%Y-%m-%d")
-                result.append({"day": day, "close": nav})
-        return result if result else None
+            eq_ret = item.get("equityReturn") or 0  # 已复权的日收益率（%），含拆分红修正
+            if not ts:
+                continue
+            day = datetime.fromtimestamp(ts / 1000, tz).strftime("%Y-%m-%d")
+            if eq_ret == 0 and prev_close == 1.0:
+                # 第一条数据无前值可比较，记录基础价但不算收益
+                result.append({"day": day, "close": prev_close})
+                continue
+            prev_close *= (1 + eq_ret / 100)
+            result.append({"day": day, "close": prev_close})
+        return result if len(result) >= 2 else None
     except Exception as e:
         logger.warning(f"获取 {code} 净值数据失败: {e}")
         return None
