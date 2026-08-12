@@ -56,24 +56,35 @@ C4 测试（5只ETF）中，159915/512880/588000 三只 ETF 跟踪误差显示"�
 C4 重测后 5 只全部"暂无数据"（原 2 只可用）。重试加倍了请求量，加剧限流。
 
 ---
-### v7.2 — 2026-08-12（降低并发度）
+### v7.2 — 2026-08-12（降低并发度）❌ 已回滚
 
 #### 触发原因
-
 v7.1 的重试方案恶化问题，转向从源头减少并发请求数。
 
 #### 修改了什么
+`basic.py` `max_workers`: 5→3, `fetch_performances` `max_workers`: 5→3
 
-| 文件 | 位置 | 改动 |
-|------|------|------|
-| `basic.py` L73 | `max_workers` | 5 → 3 |
-| `_shared.py` L644 | `fetch_performances` `max_workers` | 5 → 3 |
+#### 结果：失败 + 新增回归
+C4 重测后跟踪误差依旧全空，且实时行情（最新价/涨跌幅/成交额）也全变成"暂无数据"——由独立的 Sina `hq.sinajs.cn` Vercel 不可用导致。
 
-效果：最多并发请求从 15 降到 9（`basic.py` 3 worker × 3 页 = 9），低于东方财富限流阈值。
+---
+### v7.3 — 2026-08-12（跟踪误差换 tsdata 页面 + Sina HTTP）
+
+#### 触发原因
+1. 跟踪误差：`fund.eastmoney.com/{code}.html` 的年化跟踪误差是 JS 动态渲染，`urllib` 抓不到
+2. 实时行情：Sina `hq.sinajs.cn` 在 Vercel 上返回空（疑似 HTTPS/TLS 兼容问题）
+
+#### 修改了什么
+
+| 文件 | 改动 |
+|------|------|
+| `_shared.py` `fetch_fund_detail()` | 主页面 → `fundf10.eastmoney.com/tsdata_{code}.html`（静态 HTML 含年化跟踪误差） |
+| `_shared.py` `_fetch_single_performance()` | 同上 |
+| `_shared.py` `fetch_snapshots()` | `https://hq.sinajs.cn` → `http://hq.sinajs.cn`（避开 Vercel TLS 兼容问题） |
 
 #### 代价 / 副作用
-
-- 5 只 ETF 场景下 `basic.py` 分两批执行（3 + 2），总耗时可能增加 1-2s，可接受。
+- tsdata 页面对部分新 ETF 可能不存在（fallback 为 null 即"暂无数据"），可接受
+- Sina HTTP 明文传输，数据非敏感无影响
 - 不涉及 Prompt 变化。
 
 ### vs v6 基准

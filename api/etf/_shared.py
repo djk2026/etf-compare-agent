@@ -305,10 +305,10 @@ def fetch_fund_list() -> dict[str, dict]:
 # ── 基金详情（规模、成立日期）──────────────────────────────
 
 def fetch_fund_detail(code: str) -> dict:
-    """并行下载 pingzhongdata（规模）+ f10 概况页（费率/跟踪标的）+ 主页面（跟踪误差）"""
+    """并行下载 pingzhongdata（规模）+ f10 概况页（费率/跟踪标的）+ tsdata（跟踪误差）"""
     pz_url = f"http://fund.eastmoney.com/pingzhongdata/{code}.js"
     f10_url = f"http://fundf10.eastmoney.com/jbgk_{code}.html"
-    main_url = f"http://fund.eastmoney.com/{code}.html"
+    tsdata_url = f"http://fundf10.eastmoney.com/tsdata_{code}.html"
 
     def _get(url: str, timeout: int) -> str:
         try:
@@ -322,10 +322,10 @@ def fetch_fund_detail(code: str) -> dict:
     with ThreadPoolExecutor(max_workers=3) as executor:
         f_pz = executor.submit(_get, pz_url, 10)
         f_f10 = executor.submit(_get, f10_url, 10)
-        f_main = executor.submit(_get, main_url, 10)
+        f_ts = executor.submit(_get, tsdata_url, 10)
         raw = f_pz.result()
         html = f_f10.result()
-        main_html = f_main.result()
+        ts_html = f_ts.result()
 
     result = {}
 
@@ -379,9 +379,11 @@ def fetch_fund_detail(code: str) -> dict:
     except Exception as e:
         logger.warning(f"获取 {code} f10 概况页失败: {e}")
 
-    # 从主页面抓取年化跟踪误差（格式：跟踪标的：沪深300指数 | 年化跟踪误差：0.35%）
-    if main_html:
-        m_te = re.search(r'年化跟踪误差[：:]\s*([\d.]+)\s*%', main_html)
+    # 从 tsdata 特色数据页面抓取年化跟踪误差
+    # HTML 格式: <th>跟踪指数</th><th>年化跟踪误差</th><th>同类平均跟踪误差</th>
+    #            </tr><tr><td>沪深300指数</td><td>0.35%</td><td>2.27%</td></tr>
+    if ts_html:
+        m_te = re.search(r'年化跟踪误差</th>.*?<td[^>]*>.*?</td>\s*<td[^>]*>([\d.]+)%</td>', ts_html, re.DOTALL)
         if m_te:
             result["tracking_error"] = float(m_te.group(1)) / 100  # 百分比转小数
 
@@ -402,7 +404,7 @@ def fetch_snapshots(codes: list[str]) -> dict[str, Optional[dict]]:
     if not sina_symbols:
         return {code: None for code in codes}
 
-    url = "https://hq.sinajs.cn/list=" + ",".join(sina_symbols)
+    url = "http://hq.sinajs.cn/list=" + ",".join(sina_symbols)
     req = urllib.request.Request(url, headers=HEADERS_SINA)
 
     try:
@@ -623,14 +625,14 @@ def _fetch_single_performance(code: str, days: int = 260) -> Optional[dict]:
         return None
     result = {"name": "", "returns": returns}
 
-    # 从东方财富基金详情页直接抓取年化跟踪误差（无需 INDEX_CODE_MAP + 指数K线 + 净值计算）
-    # 页面格式示例：跟踪标的：沪深300指数 | 年化跟踪误差：0.35%
+    # 从东方财富 tsdata 特色数据页面抓取年化跟踪误差
+    # HTML 格式: <th>跟踪指数</th><th>年化跟踪误差</th>...<td>0.35%</td>
     try:
-        main_url = f"http://fund.eastmoney.com/{code}.html"
-        req = urllib.request.Request(main_url, headers=HEADERS_EASTMONEY)
+        tsdata_url = f"http://fundf10.eastmoney.com/tsdata_{code}.html"
+        req = urllib.request.Request(tsdata_url, headers=HEADERS_EASTMONEY)
         with urllib.request.urlopen(req, timeout=10) as resp:
-            main_html = resp.read().decode("utf-8", errors="replace")
-        m_te = re.search(r'年化跟踪误差[：:]\s*([\d.]+)\s*%', main_html)
+            ts_html = resp.read().decode("utf-8", errors="replace")
+        m_te = re.search(r'年化跟踪误差</th>.*?<td[^>]*>.*?</td>\s*<td[^>]*>([\d.]+)%</td>', ts_html, re.DOTALL)
         if m_te:
             result["tracking_error"] = float(m_te.group(1)) / 100  # 百分比转小数
     except Exception:
