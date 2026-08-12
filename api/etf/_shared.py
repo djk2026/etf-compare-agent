@@ -187,27 +187,43 @@ def infer_tracking_index(name: str) -> Optional[str]:
     return None
 
 
-def infer_industry(name: str, fund_type: str) -> Optional[str]:
+def infer_industry(tracking_index: Optional[str] = None, name: str = "", fund_type: str = "") -> str:
+    """根据跟踪标的名称推断行业分类，兜底采用 ETF 名称关键词匹配。
+    优先使用 f10 页面抓取的跟踪标的名（比 ETF 名称更权威、更精确）。
+    """
     industry_map = [
+        # 行业/主题组（优先匹配，避免被宽基关键词截胡）
+        (["半导体", "芯片", "5G", "人工智能", "计算机", "通信", "大数据", "云计算", "电子", "信息技术"], "科技/TMT"),
+        (["新能源", "光伏", "新能源汽车", "电池", "碳中和", "电力"], "新能源"),
+        (["医药", "医药卫生", "创新药", "中药", "医疗", "生物医药", "医疗器械"], "医药健康"),
+        (["银行", "证券", "金融", "保险"], "金融"),
+        (["消费", "食品饮料", "白酒", "酒", "家电"], "消费"),
+        (["军工", "国防", "航空"], "国防军工"),
+        (["房地产", "基建", "建筑"], "地产基建"),
+        (["煤炭", "钢铁", "有色金属", "化工", "稀土", "黄金", "石油", "能源"], "资源周期"),
+        (["传媒", "游戏", "影视", "动漫"], "传媒娱乐"),
+        (["红利"], "红利策略"),
+        # 宽基指数组（兜底，优先级低于行业）
         (["沪深300", "上证50", "上证180", "深证100", "中证100"], "大盘蓝筹"),
         (["中证500", "中证800"], "中盘成长"),
         (["中证1000", "中证2000", "国证2000"], "小盘成长"),
         (["科创50", "科创100", "科创创业50", "创业板"], "科技创新"),
-        (["半导体", "芯片", "5G", "人工智能", "计算机", "通信", "大数据", "云计算", "电子"], "科技/TMT"),
-        (["新能源", "光伏", "新能源汽车", "电池", "碳中和", "电力"], "新能源"),
-        (["医药", "创新药", "中药", "医疗", "生物医药"], "医药健康"),
-        (["银行", "证券", "金融", "保险"], "金融"),
-        (["消费", "食品饮料", "白酒", "酒", "家电"], "消费"),
-        (["军工", "国防", "航"], "国防军工"),
-        (["房地产", "基建"], "地产基建"),
-        (["煤炭", "钢铁", "有色金属", "化工", "稀土", "黄金"], "资源周期"),
-        (["传媒", "游戏"], "传媒娱乐"),
-        (["红利"], "红利策略"),
     ]
+
+    # 优先匹配跟踪标的（f10 页面抓取，比 ETF 名称精确）
+    source = tracking_index or name or ""
     for keywords, industry in industry_map:
         for kw in keywords:
-            if kw in name:
+            if kw in source:
                 return industry
+
+    # 兜底：跟踪标的不含关键词时再扫 ETF 名称
+    if tracking_index and source != (name or ""):
+        for keywords, industry in industry_map:
+            for kw in keywords:
+                if kw in (name or ""):
+                    return industry
+
     return "综合/其他"
 
 
@@ -289,9 +305,10 @@ def fetch_fund_list() -> dict[str, dict]:
 # ── 基金详情（规模、成立日期）──────────────────────────────
 
 def fetch_fund_detail(code: str) -> dict:
-    """并行下载 pingzhongdata（规模）+ f10 概况页（成立日期/费率/跟踪标的）"""
+    """并行下载 pingzhongdata（规模）+ f10 概况页（费率/跟踪标的）+ 主页面（跟踪误差）"""
     pz_url = f"http://fund.eastmoney.com/pingzhongdata/{code}.js"
     f10_url = f"http://fundf10.eastmoney.com/jbgk_{code}.html"
+    main_url = f"http://fund.eastmoney.com/{code}.html"
 
     def _get(url: str, timeout: int) -> str:
         try:
@@ -302,11 +319,13 @@ def fetch_fund_detail(code: str) -> dict:
             logger.warning(f"获取 {code} {url} 失败: {e}")
             return ""
 
-    with ThreadPoolExecutor(max_workers=2) as executor:
+    with ThreadPoolExecutor(max_workers=3) as executor:
         f_pz = executor.submit(_get, pz_url, 10)
         f_f10 = executor.submit(_get, f10_url, 10)
+        f_main = executor.submit(_get, main_url, 10)
         raw = f_pz.result()
         html = f_f10.result()
+        main_html = f_main.result()
 
     result = {}
 
@@ -359,6 +378,16 @@ def fetch_fund_detail(code: str) -> dict:
             result["tracking_index"] = m_track.group(1).strip()
     except Exception as e:
         logger.warning(f"获取 {code} f10 概况页失败: {e}")
+
+    # 从主页面抓取年化跟踪误差（格式：跟踪标的：沪深300指数 | 年化跟踪误差：0.35%）
+    # 多 ETF 并发时可能触发东方财富限流，首次失败后重试一次（错峰延迟）
+    if not main_html:
+        time.sleep(1.5)
+        main_html = _get(main_url, 10)
+    if main_html:
+        m_te = re.search(r'年化跟踪误差[：:]\s*([\d.]+)\s*%', main_html)
+        if m_te:
+            result["tracking_error"] = float(m_te.group(1)) / 100  # 百分比转小数
 
     return result
 
@@ -571,10 +600,9 @@ def fetch_etf_nav(code: str) -> Optional[list]:
         return None
 
 
-def _fetch_single_performance(code: str, days: int = 260,
-                              tracking_index: Optional[str] = None) -> Optional[dict]:
-    """单只 ETF 历史表现（两阶段并行，缩短最坏耗时）：
-    阶段1：K线 + 跟踪指数解析 并行；阶段2：指数K线 + 净值 并行。
+def _fetch_single_performance(code: str, days: int = 260) -> Optional[dict]:
+    """单只 ETF 历史表现。
+    跟踪误差直接从东方财富基金详情页抓取（无需 INDEX_CODE_MAP + 指数K线 + 净值计算）。
     """
     kline_symbol = resolve_kline_symbol(code)
     kline_url = (
@@ -591,38 +619,7 @@ def _fetch_single_performance(code: str, days: int = 260,
             logger.warning(f"获取 {code} K 线数据失败: {e}")
             return None
 
-    def _resolve_tracking_index():
-        if tracking_index:
-            return tracking_index
-        # 首选 f10 概况页（44KB，远快于全量基金列表 2MB），且数据来自官方页面更准
-        try:
-            f10_url = f"http://fundf10.eastmoney.com/jbgk_{code}.html"
-            req = urllib.request.Request(f10_url, headers=HEADERS_EASTMONEY)
-            with urllib.request.urlopen(req, timeout=10) as resp:
-                html = resp.read().decode("utf-8", errors="replace")
-            m_track = re.search(r"跟踪标的</th><td>([^<]+)</td>", html)
-            if m_track:
-                return m_track.group(1).strip()
-        except Exception:
-            pass
-        # 兜底：基金列表关键词匹配
-        try:
-            fund_list = fetch_fund_list()
-            fund = fund_list.get(code)
-            return fund.get("tracking_index") if fund else None
-        except Exception:
-            return None
-
-    # 阶段1：K线 与 跟踪指数解析 并行（fund list 冷启动慢时以 12s 为限，超时不阻塞主流程）
-    with ThreadPoolExecutor(max_workers=2) as executor:
-        f_kline = executor.submit(_fetch_kline)
-        f_track = executor.submit(_resolve_tracking_index)
-        data = f_kline.result(timeout=12)
-        try:
-            resolved_track = f_track.result(timeout=12)
-        except Exception:
-            resolved_track = None
-
+    data = _fetch_kline()
     if not isinstance(data, list) or len(data) == 0:
         return None
     returns = calculate_returns(data)
@@ -630,16 +627,22 @@ def _fetch_single_performance(code: str, days: int = 260,
         return None
     result = {"name": "", "returns": returns}
 
-    # 阶段2：指数K线 与 净值 并行（仅当跟踪指数命中 INDEX_CODE_MAP）
-    index_symbol = INDEX_CODE_MAP.get(resolved_track or "")
-    if index_symbol:
-        with ThreadPoolExecutor(max_workers=2) as executor:
-            f_idx = executor.submit(fetch_index_kline, index_symbol, days)
-            f_nav = executor.submit(fetch_etf_nav, code)
-            index_kline = f_idx.result(timeout=12)
-            nav_data = f_nav.result(timeout=12)
-        if index_kline and nav_data:
-            result["tracking_error"] = calculate_tracking_error(nav_data, index_kline)
+    # 从东方财富基金详情页直接抓取年化跟踪误差（无需 INDEX_CODE_MAP + 指数K线 + 净值计算）
+    # 页面格式示例：跟踪标的：沪深300指数 | 年化跟踪误差：0.35%
+    # 多 ETF 并发时可能触发东方财富限流，首次失败后重试一次（错峰延迟）
+    main_url = f"http://fund.eastmoney.com/{code}.html"
+    for attempt in range(2):
+        try:
+            req = urllib.request.Request(main_url, headers=HEADERS_EASTMONEY)
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                main_html = resp.read().decode("utf-8", errors="replace")
+            m_te = re.search(r'年化跟踪误差[：:]\s*([\d.]+)\s*%', main_html)
+            if m_te:
+                result["tracking_error"] = float(m_te.group(1)) / 100  # 百分比转小数
+            break  # 请求成功（无论是否匹配到跟踪误差）都退出
+        except Exception:
+            if attempt == 0:
+                time.sleep(1.5)  # 首次失败后延迟重试
     return result
 
 

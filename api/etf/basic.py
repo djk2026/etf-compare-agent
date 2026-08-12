@@ -8,7 +8,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # Vercel 运行时 `api/etf/` 是当前目录
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from _shared import fetch_fund_list, fetch_fund_detail
+from _shared import fetch_fund_list, fetch_fund_detail, infer_industry
 
 
 def _build_entry(code: str, fund: dict) -> tuple[str, dict]:
@@ -27,6 +27,7 @@ def _build_entry(code: str, fund: dict) -> tuple[str, dict]:
         "management_fee": None,
         "custody_fee": None,
         "fee_rate": None,
+        "tracking_error": None,
     }
     detail = fetch_fund_detail(code)
     if detail:
@@ -38,6 +39,13 @@ def _build_entry(code: str, fund: dict) -> tuple[str, dict]:
         entry["fee_rate"] = detail.get("fee_rate")
         # 页面抓取的跟踪标的优先于关键词匹配（东方财富官方数据，避免"酒/白酒"混淆）
         entry["tracking_index"] = detail.get("tracking_index") or entry["tracking_index"]
+        entry["tracking_error"] = detail.get("tracking_error")  # 东方财富直接披露的年化跟踪误差
+        # 用 f10 页面抓取的跟踪标的重新推断行业（比 ETF 名称匹配更精确）
+        entry["industry"] = infer_industry(
+            tracking_index=entry["tracking_index"],
+            name=entry["name"],
+            fund_type=entry["fund_type"],
+        )
     return code, entry
 
 
