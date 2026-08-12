@@ -380,10 +380,6 @@ def fetch_fund_detail(code: str) -> dict:
         logger.warning(f"获取 {code} f10 概况页失败: {e}")
 
     # 从主页面抓取年化跟踪误差（格式：跟踪标的：沪深300指数 | 年化跟踪误差：0.35%）
-    # 多 ETF 并发时可能触发东方财富限流，首次失败后重试一次（错峰延迟）
-    if not main_html:
-        time.sleep(1.5)
-        main_html = _get(main_url, 10)
     if main_html:
         m_te = re.search(r'年化跟踪误差[：:]\s*([\d.]+)\s*%', main_html)
         if m_te:
@@ -629,27 +625,23 @@ def _fetch_single_performance(code: str, days: int = 260) -> Optional[dict]:
 
     # 从东方财富基金详情页直接抓取年化跟踪误差（无需 INDEX_CODE_MAP + 指数K线 + 净值计算）
     # 页面格式示例：跟踪标的：沪深300指数 | 年化跟踪误差：0.35%
-    # 多 ETF 并发时可能触发东方财富限流，首次失败后重试一次（错峰延迟）
-    main_url = f"http://fund.eastmoney.com/{code}.html"
-    for attempt in range(2):
-        try:
-            req = urllib.request.Request(main_url, headers=HEADERS_EASTMONEY)
-            with urllib.request.urlopen(req, timeout=10) as resp:
-                main_html = resp.read().decode("utf-8", errors="replace")
-            m_te = re.search(r'年化跟踪误差[：:]\s*([\d.]+)\s*%', main_html)
-            if m_te:
-                result["tracking_error"] = float(m_te.group(1)) / 100  # 百分比转小数
-            break  # 请求成功（无论是否匹配到跟踪误差）都退出
-        except Exception:
-            if attempt == 0:
-                time.sleep(1.5)  # 首次失败后延迟重试
+    try:
+        main_url = f"http://fund.eastmoney.com/{code}.html"
+        req = urllib.request.Request(main_url, headers=HEADERS_EASTMONEY)
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            main_html = resp.read().decode("utf-8", errors="replace")
+        m_te = re.search(r'年化跟踪误差[：:]\s*([\d.]+)\s*%', main_html)
+        if m_te:
+            result["tracking_error"] = float(m_te.group(1)) / 100  # 百分比转小数
+    except Exception:
+        pass  # 无跟踪误差数据（新基金等）时保持 None
     return result
 
 
 def fetch_performances(codes: list[str]) -> dict[str, Optional[dict]]:
     """并发获取多只 ETF 历史表现（适应 Vercel 10s 超时限制）"""
     results = {}
-    with ThreadPoolExecutor(max_workers=min(len(codes), 5)) as executor:
+    with ThreadPoolExecutor(max_workers=min(len(codes), 3)) as executor:
         futures = {
             executor.submit(_fetch_single_performance, code, 260): code
             for code in codes

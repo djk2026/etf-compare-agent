@@ -70,7 +70,7 @@ class handler(BaseHTTPRequestHandler):
 
             # 多只 ETF 详情抓取并发执行（每只内部 pingzhongdata + f10 已并行）
             if valid_codes:
-                with ThreadPoolExecutor(max_workers=min(len(valid_codes), 5)) as executor:
+                with ThreadPoolExecutor(max_workers=min(len(valid_codes), 3)) as executor:
                     futures = {executor.submit(_build_entry, c, fund_list[c]): c for c in valid_codes}
                     for future in as_completed(futures):
                         code, entry = future.result()
